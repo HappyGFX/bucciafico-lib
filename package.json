@@ -1,0 +1,15 @@
+{
+  "name": "bucciafico-lib",
+  "version": "1.0.0-BETA",
+  "description": "Minecraft 3D Skin Viewer & Editor Library",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "peerDependencies": {
+    "three": "^0.160.0"
+  },
+  "author": "Dawid Maj",
+  "license": "MIT"
+}
