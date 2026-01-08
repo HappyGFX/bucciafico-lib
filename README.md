@@ -65,11 +65,13 @@ const viewer = new SkinViewer(document.getElementById('app'));
 const editor = new EditorPlugin();
 const effects = new EffectsPlugin();
 const items = new ItemsPlugin();
+const io = new IOPlugin();
 
 // Register Plugins
 viewer.addPlugin(editor);
 viewer.addPlugin(effects);
 viewer.addPlugin(items);
+viewer.addPlugin(io);
 
 // Load Skin
 viewer.loadSkinByUsername('Notch');
@@ -150,6 +152,27 @@ items.addItem('path/to/sword.png', 'Diamond Sword').then(mesh => {
 // Remove Item
 items.removeItem(meshObject);
 ```
+
+### IOPlugin
+```javascript
+const io = viewer.getPlugin('IOPlugin');
+
+// Export State
+// You can filter what to export using options
+const jsonState = io.exportState({
+    skin: true,
+    camera: true,
+    effects: true,
+    pose: true,
+    items: true
+});
+
+// Import State (Async)
+io.importState(jsonState).then(() => {
+    console.log('Scene restored');
+});
+```
+
 
 ## License
 MIT License

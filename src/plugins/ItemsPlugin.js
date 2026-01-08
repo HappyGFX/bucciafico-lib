@@ -25,6 +25,7 @@ export class ItemsPlugin {
 
         return ItemFactory.createFromURL(url, name).then(mesh => {
             mesh.position.set(8, 8, 8);
+            mesh.userData.sourceUrl = url;
             this.viewer.scene.add(mesh);
             this.items.push(mesh);
 

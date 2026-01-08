@@ -8,6 +8,7 @@ import { PostProcessingManager } from '../managers/PostProcessingManager.js';
 export class EffectsPlugin {
     constructor() {
         this.name = 'EffectsPlugin';
+        this.isEnabled = false;
     }
 
     init(viewer) {
@@ -16,6 +17,8 @@ export class EffectsPlugin {
         const h = viewer.container.clientHeight;
 
         this.composer = new PostProcessingManager(viewer.renderer, viewer.scene, viewer.cameraManager.camera, w, h);
+
+        this.composer.setBloom(false, 0, 0, 0.1);
     }
 
     /**
@@ -23,6 +26,7 @@ export class EffectsPlugin {
      * @param {Object} config - { enabled, strength, radius, height, thickness }
      */
     updateConfig(config) {
+        this.isEnabled = config.enabled;
         const skin = this.viewer.skinModel;
 
         // Update Shader Materials
@@ -90,8 +94,6 @@ export class EffectsPlugin {
             this.composer.resize(width, height);
         }
 
-        // --- ZAPIS STANU ---
-        // Zapamiętujemy, czy grid ma być włączony wg configu
         const wasGridEnabled = this.viewer.config.showGrid;
         const prevBg = this.viewer.scene.background;
         const prevSel = this.composer.outlinePass.selectedObjects;
@@ -99,28 +101,21 @@ export class EffectsPlugin {
         renderer.getClearColor(prevClearColor);
         const prevClearAlpha = renderer.getClearAlpha();
 
-        // --- PRZYGOTOWANIE SCENY ---
         this.composer.setSelected(null);
 
-        // KLUCZOWA POPRAWKA:
-        // Wyłączamy grid w configu. Dzięki temu metoda this.render(),
-        // która przywraca scenę po bloomie, nie włączy go z powrotem "na siłę".
         this.viewer.config.showGrid = false;
         this.viewer.sceneSetup.setGridVisible(false);
 
         this.viewer.scene.background = null;
-        renderer.setClearColor(0x000000, 0); // Transparent black
+        renderer.setClearColor(0x000000, 0);
 
-        // --- RENDER ---
         this.render();
 
         const dataUrl = renderer.domElement.toDataURL("image/png");
 
-        // --- PRZYWRACANIE STANU ---
         this.viewer.scene.background = prevBg;
         renderer.setClearColor(prevClearColor, prevClearAlpha);
 
-        // Przywracamy flagę w configu i widoczność
         this.viewer.config.showGrid = wasGridEnabled;
         this.viewer.sceneSetup.setGridVisible(wasGridEnabled);
 
@@ -136,4 +131,19 @@ export class EffectsPlugin {
         this.viewer.cameraManager.update();
         return dataUrl;
     }
+
+    getConfig() {
+        const skin = this.viewer.skinModel;
+        const glowMesh = skin.glowMeshes[0];
+
+        return {
+            enabled: this.isEnabled,
+            strength: this.composer.bloomPass.strength,
+            radius: this.composer.bloomPass.radius,
+
+            height: glowMesh ? glowMesh.userData.glowMat.uniforms.gradientLimit.value : 0.5,
+            thickness: glowMesh ? glowMesh.userData.glowMat.uniforms.thickness.value / 0.05 : 4
+        };
+    }
+
 }

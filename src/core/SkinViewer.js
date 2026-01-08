@@ -116,6 +116,7 @@ export class SkinViewer {
 
                 this.skinModel.build(texture, isSlim);
                 this.skinModel.setPose(currentPose);
+                this.skinData = { type: 'url', value: imageUrl };
 
                 resolve(isSlim);
             }, undefined, reject);
@@ -123,7 +124,13 @@ export class SkinViewer {
     }
 
     loadSkinByUsername(username) {
-        return this.loadSkin(`https://minotar.net/skin/${username}.png?v=${Date.now()}`);
+        this.skinData = { type: 'username', value: username };
+        const url = `https://minotar.net/skin/${username}.png?v=${Date.now()}`;
+
+        return this.loadSkin(url).then(res => {
+            this.skinData = { type: 'username', value: username };
+            return res;
+        });
     }
 
     setPose(poseData) {
