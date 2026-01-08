@@ -1,6 +1,6 @@
 {
   "name": "bucciafico-lib",
-  "version": "1.0.0-BETA",
+  "version": "1.0.1-BETA",
   "description": "Minecraft 3D Skin Viewer & Editor Library",
   "main": "index.js",
   "type": "module",

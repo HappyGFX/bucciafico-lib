@@ -23,7 +23,7 @@ export class SceneSetup {
     }
 
     initHelpers() {
-        this.gridHelper = new THREE.GridHelper(2000, 125, 0x333333, 0x111111);
+        this.gridHelper = new THREE.GridHelper(2000, 125, 0x8b5cf6, 0x222222);
         this.gridHelper.position.y = -24;
         this.scene.add(this.gridHelper);
     }
