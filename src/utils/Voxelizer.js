@@ -26,7 +26,7 @@ export function createVoxelLayer(texture, layerDef) {
         { u: outer.x, v: outer.y+d, w: d, h: h, pos: (i,j) => new THREE.Vector3(-w/2-0.25, j-h/2+0.5, i-d/2+0.5), sx: 0.5 },
         { u: outer.x+d+w, v: outer.y+d, w: d, h: h, pos: (i,j) => new THREE.Vector3(w/2+0.25, j-h/2+0.5, -(i-d/2+0.5)), sx: 0.5 },
         { u: outer.x+d, v: outer.y, w: w, h: d, pos: (i,j) => new THREE.Vector3(i-w/2+0.5, h/2+0.25, -(j-d/2+0.5)), sy: 0.5 },
-        { u: outer.x+d+w, v: outer.y, w: w, h: d, pos: (i,j) => new THREE.Vector3(i-w/2+0.5, -h/2-0.25, j-d/2+0.5), sy: 0.5 }
+        { u: outer.x+d+w, v: outer.y, w: w, h: d, pos: (i,j) => new THREE.Vector3(i-w/2+0.5, -h/2-0.25, (d - 1 - j) - d/2 + 0.5), sy: 0.5 }
     ];
 
     const baseGeo = new THREE.BoxGeometry(1, 1, 1);

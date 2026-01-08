@@ -12,23 +12,40 @@ export function getUV(x, y, w, h) {
  */
 export function applySkinUVs(geometry, x, y, w, h, d) {
     const uvAttr = geometry.attributes.uv;
-    const map = (idx, uX, uY, uW, uH) => {
+
+    /**
+     * Helper to map a single face.
+     * @param {number} idx - Face index (0-5).
+     * @param {number} uX - Texture X.
+     * @param {number} uY - Texture Y.
+     * @param {number} uW - Texture Width.
+     * @param {number} uH - Texture Height.
+     * @param {boolean} flipX - Mirror horizontally.
+     * @param {boolean} flipY - Mirror vertically.
+     */
+    const map = (idx, uX, uY, uW, uH, flipX = false, flipY = false) => {
         const uv = getUV(uX, uY, uW, uH);
         const i = idx * 4;
-        // Standard UV mapping for cube face
-        uvAttr.setXY(i+0, uv.u0, uv.v1);
-        uvAttr.setXY(i+1, uv.u1, uv.v1);
-        uvAttr.setXY(i+2, uv.u0, uv.v0);
-        uvAttr.setXY(i+3, uv.u1, uv.v0);
+
+        // Handle flipping
+        const u0 = flipX ? uv.u1 : uv.u0;
+        const u1 = flipX ? uv.u0 : uv.u1;
+        const v0 = flipY ? uv.v1 : uv.v0;
+        const v1 = flipY ? uv.v0 : uv.v1;
+
+        uvAttr.setXY(i+0, u0, v1);
+        uvAttr.setXY(i+1, u1, v1);
+        uvAttr.setXY(i+2, u0, v0);
+        uvAttr.setXY(i+3, u1, v0);
     };
 
-    // Order: Right, Left, Top, Bottom, Front, Back
-    map(0, x + d + w, y + d, d, h);
-    map(1, x, y + d, d, h);
-    map(2, x + d, y, w, d);
-    map(3, x + d + w, y, w, d);
-    map(4, x + d, y + d, w, h);
-    map(5, x + d + w + d, y + d, w, h);
+    map(0, x + d + w, y + d, d, h); // Right
+    map(1, x, y + d, d, h); // Left
+    map(2, x + d, y, w, d); // Top
+    map(3, x + d + w, y, w, d, false, true); // Bottom
+    map(4, x + d, y + d, w, h); // Front
+    map(5, x + d + w + d, y + d, w, h); // Back
+
     uvAttr.needsUpdate = true;
 }
 
