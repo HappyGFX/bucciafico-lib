@@ -18,7 +18,7 @@ export class PostProcessingManager {
         this.bloomComposer.renderToScreen = false;
         this.bloomComposer.addPass(new RenderPass(scene, camera));
 
-        this.bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 1.5, 0.4, 0.0);
+        this.bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 1.5, 0.4, 0.85);
         this.bloomComposer.addPass(this.bloomPass);
 
         // 2. FINAL COMPOSER
@@ -49,13 +49,26 @@ export class PostProcessingManager {
                 uniform sampler2D tDiffuse;
                 uniform sampler2D bloomTexture;
                 varying vec2 vUv;
+                
                 void main() {
                     vec4 baseColor = texture2D(tDiffuse, vUv);
                     vec4 bloomColor = texture2D(bloomTexture, vUv);
                     
-                    // Add only colors (RGB), keep the Base Alpha.
-                    // This prevents the black background of the bloom pass from overwriting transparency.
-                    gl_FragColor = vec4(baseColor.rgb + (bloomColor.rgb * 2.5), baseColor.a);
+                    vec3 bloomRGB = bloomColor.rgb;
+                    float brightness = max(bloomRGB.r, max(bloomRGB.g, bloomRGB.b));
+                    
+                    if (brightness < 0.15) {
+                        bloomRGB = vec3(0.0);
+                        brightness = 0.0;
+                    } else {
+                        bloomRGB = (bloomRGB - 0.15) * 1.2; 
+                    }
+
+                    vec3 finalColor = baseColor.rgb + (bloomRGB * 2.0);
+                    float glowAlpha = clamp(brightness, 0.0, 1.0);
+                    float finalAlpha = max(baseColor.a, glowAlpha);
+
+                    gl_FragColor = vec4(finalColor, finalAlpha);
                 }
             `
         };

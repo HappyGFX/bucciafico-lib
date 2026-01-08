@@ -35,7 +35,7 @@ export class EffectsPlugin {
         if (config.height !== undefined) skin.updateGlowHeight(config.height);
 
         // Update Composer Pass
-        this.composer.setBloom(config.enabled, config.strength, config.radius, 0.1);
+        this.composer.setBloom(config.enabled, config.strength, config.radius, 0.85);
     }
 
     /**

@@ -6,7 +6,6 @@ const vertexShader = `
     varying vec3 vNormal;
     void main() {
         vNormal = normal;
-        // Extrude vertex along normal
         vec3 newPos = position + normal * thickness;
         vY = position.y;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(newPos, 1.0);
@@ -21,10 +20,8 @@ const fragmentShader = `
     varying vec3 vNormal;
     void main() {
         if (opacity <= 0.01) discard;
-        // Discard bottom faces to avoid "floor" artifact
         if (vNormal.y < -0.9) discard;
         
-        // Gradient logic
         float normalizedY = (vY + (partHeight / 2.0)) / partHeight;
         float alpha = smoothstep(1.0 - gradientLimit, 1.0, normalizedY);
         alpha *= smoothstep(0.0, 0.2, normalizedY);
@@ -49,8 +46,11 @@ export function createGlowMaterial(partHeight) {
         vertexShader,
         fragmentShader,
         transparent: true,
-        side: THREE.BackSide, // Render inside of the extruded box
+        side: THREE.BackSide,
         depthWrite: false,
-        blending: THREE.AdditiveBlending
+        blending: THREE.AdditiveBlending,
+        polygonOffset: true,
+        polygonOffsetFactor: 1.0,
+        polygonOffsetUnits: 4.0
     });
 }

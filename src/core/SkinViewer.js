@@ -17,6 +17,7 @@ export class SkinViewer {
      * @param {boolean} [config.transparent=false] - Background transparency.
      * @param {number} [config.bgColor=0x141417] - Background hex color.
      * @param {boolean} [config.cameraEnabled=true] - OrbitControls state.
+     * @param {boolean} [config.renderPaused=false] - If true, rendering only happens on interaction/change.
      */
     constructor(containerElement, config = {}) {
         this.container = containerElement;
@@ -25,6 +26,7 @@ export class SkinViewer {
             transparent: config.transparent ?? false,
             bgColor: config.bgColor ?? 0x141417,
             cameraEnabled: config.cameraEnabled ?? true,
+            renderPaused: config.renderPaused ?? false,
             ...config
         };
 
@@ -33,6 +35,9 @@ export class SkinViewer {
 
         /** @type {boolean} Flag to stop the animation loop. */
         this.isDisposed = false;
+
+        this.isVisible = true;
+        this.needsRender = true;
 
         // --- 1. RENDERER SETUP ---
         this.renderer = new THREE.WebGLRenderer({
@@ -62,15 +67,36 @@ export class SkinViewer {
         this.sceneSetup = new SceneSetup(this.scene);
         this.sceneSetup.setGridVisible(this.config.showGrid);
 
-        this.cameraManager = new CameraManager(this.renderer.domElement, w, h);
+        this.cameraManager = new CameraManager(this.renderer.domElement, w, h, () => {
+            this.needsRender = true;
+        });
         this.cameraManager.setEnabled(this.config.cameraEnabled);
 
         this.skinModel = new SkinModel();
         this.scene.add(this.skinModel.getGroup());
 
+        this.observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) {
+                this.isVisible = true;
+                this.needsRender = true;
+                this.animate();
+            } else {
+                this.isVisible = false;
+            }
+        }, { threshold: 0 });
+        this.observer.observe(this.container);
+
         // --- 3. START LOOP ---
         this.animate = this.animate.bind(this);
         this.animate();
+    }
+
+    /**
+     * Manually requests a frame to be rendered.
+     * Use this when changing model properties via code.
+     */
+    requestRender() {
+        this.needsRender = true;
     }
 
     /**
@@ -84,6 +110,7 @@ export class SkinViewer {
 
         if (plugin.init) plugin.init(this);
         this.plugins.set(name, plugin);
+        this.requestRender();
 
         return plugin;
     }
@@ -118,6 +145,7 @@ export class SkinViewer {
                 this.skinModel.setPose(currentPose);
                 this.skinData = { type: 'url', value: imageUrl };
 
+                this.requestRender();
                 resolve(isSlim);
             }, undefined, reject);
         });
@@ -139,6 +167,7 @@ export class SkinViewer {
         if (editor) editor.saveHistory();
 
         this.skinModel.setPose(poseData);
+        this.requestRender();
     }
 
     /**
@@ -156,13 +185,19 @@ export class SkinViewer {
         this.plugins.forEach(p => {
             if (p.onResize) p.onResize(w, h);
         });
+
+        this.requestRender();
     }
 
     animate() {
-        if (this.isDisposed) return;
+        if (this.isDisposed || !this.isVisible) return;
         requestAnimationFrame(this.animate);
 
         this.cameraManager.update();
+
+        if (this.config.renderPaused && !this.needsRender) {
+            return;
+        }
 
         const effects = this.getPlugin('EffectsPlugin');
 
@@ -175,10 +210,13 @@ export class SkinViewer {
 
         this.renderer.clearDepth();
         this.renderer.render(this.overlayScene, this.cameraManager.camera);
+
+        this.needsRender = false;
     }
 
     dispose() {
         this.isDisposed = true;
+        this.observer.disconnect();
 
         if (this.container && this.renderer.domElement) {
             this.container.removeChild(this.renderer.domElement);

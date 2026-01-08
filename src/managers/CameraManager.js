@@ -5,7 +5,14 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
  * Wraps Three.js Camera and OrbitControls.
  */
 export class CameraManager {
-    constructor(domElement, width, height) {
+
+    /**
+     * @param {HTMLElement} domElement
+     * @param {number} width
+     * @param {number} height
+     * @param {Function} [onChange] - Callback fired when camera moves
+     */
+    constructor(domElement, width, height, onChange) {
         this.defaultFOV = 45;
         this.defaultPosition = new THREE.Vector3(20, 10, 40);
         this.defaultTarget = new THREE.Vector3(0, 0, 0);
@@ -17,6 +24,8 @@ export class CameraManager {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         this.controls.target.copy(this.defaultTarget);
+
+        if (onChange) this.controls.addEventListener('change', onChange);
     }
 
     update() { this.controls.update(); }

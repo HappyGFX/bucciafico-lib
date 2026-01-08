@@ -1,15 +1,39 @@
 {
   "name": "bucciafico-lib",
-  "version": "1.0.4-BETA",
-  "description": "Minecraft 3D Skin Viewer & Editor Library",
-  "main": "index.js",
+  "version": "1.0.5-BETA",
+  "description": "Modular 3D rendering engine for Minecraft skins based on Three.js",
   "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "src",
+    "index.js",
+    "README.md"
+  ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [
+    "minecraft",
+    "3d",
+    "threejs",
+    "skin",
+    "viewer",
+    "renderer"
+  ],
+  "author": "Dawid Maj",
+  "license": "MIT",
   "peerDependencies": {
     "three": "^0.160.0"
   },
-  "author": "Dawid Maj",
-  "license": "MIT"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HappyGFX/bucciafico-lib.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HappyGFX/bucciafico-lib/issues"
+  },
+  "homepage": "https://github.com/HappyGFX/bucciafico-lib#readme"
 }
