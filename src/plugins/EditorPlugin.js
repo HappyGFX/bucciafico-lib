@@ -9,6 +9,7 @@ import { HistoryManager } from '../managers/HistoryManager.js';
 export class EditorPlugin {
     constructor() {
         this.name = 'EditorPlugin';
+        this.hoveredObject = null;
     }
 
     /**
@@ -43,7 +44,77 @@ export class EditorPlugin {
 
     bindEvents() {
         this.onPointerDown = (e) => this.handleClick(e);
-        this.viewer.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
+        this.onPointerMove = (e) => this.handleHover(e);
+
+        const canvas = this.viewer.renderer.domElement;
+        canvas.addEventListener('pointerdown', this.onPointerDown);
+        canvas.addEventListener('pointermove', this.onPointerMove);
+    }
+
+    getIntersects(event) {
+        const rect = this.viewer.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        this.raycaster.setFromCamera(this.mouse, this.viewer.cameraManager.camera);
+
+        let objectsToCheck = [];
+
+        this.viewer.skinModel.getGroup().traverse((child) => {
+            if (child.isMesh && child.material.visible) {
+                if (child.material.side !== THREE.BackSide) {
+                    objectsToCheck.push(child);
+                }
+            }
+        });
+
+        const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
+        if (itemsPlugin) {
+            objectsToCheck = [...objectsToCheck, ...itemsPlugin.items];
+        }
+
+        return this.raycaster.intersectObjects(objectsToCheck, false);
+    }
+
+    handleHover(event) {
+        if (this.transformControl.dragging) return;
+
+        const intersects = this.getIntersects(event);
+
+        if (intersects.length > 0) {
+            const target = intersects[0].object;
+
+            if (this.hoveredObject !== target) {
+                this.unhighlightObject();
+                this.highlightObject(target);
+            }
+
+            this.viewer.renderer.domElement.style.cursor = 'pointer';
+        } else {
+            this.unhighlightObject();
+            this.viewer.renderer.domElement.style.cursor = 'default';
+        }
+    }
+
+    highlightObject(obj) {
+        this.hoveredObject = obj;
+
+        if (obj.material && obj.material.emissive) {
+            if (!obj.userData.originalHex) {
+                obj.userData.originalHex = obj.material.emissive.getHex();
+            }
+            obj.material.emissive.setHex(0x444444);
+        }
+    }
+
+    unhighlightObject() {
+        if (this.hoveredObject) {
+            const obj = this.hoveredObject;
+            if (obj.material && obj.material.emissive && obj.userData.originalHex !== undefined) {
+                obj.material.emissive.setHex(obj.userData.originalHex);
+            }
+            this.hoveredObject = null;
+        }
     }
 
     handleClick(event) {

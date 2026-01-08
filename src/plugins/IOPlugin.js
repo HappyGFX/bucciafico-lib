@@ -24,7 +24,7 @@ export class IOPlugin {
         const state = {
             meta: {
                 generator: "Bucciafico Studio",
-                version: "1.0.2-BETA",
+                version: "1.0.3-BETA",
                 timestamp: Date.now()
             },
             core: {}
