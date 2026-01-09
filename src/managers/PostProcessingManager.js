@@ -12,10 +12,18 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 export class PostProcessingManager {
     constructor(renderer, scene, camera, width, height) {
         this.scene = scene;
+        this.renderer = renderer;
+
+        this.INTERNAL_HEIGHT = 1080;
+
+        const ratio = width / height;
+        const virtualW = this.INTERNAL_HEIGHT * ratio;
+        const virtualH = this.INTERNAL_HEIGHT;
 
         // 1. BLOOM COMPOSER (Renders glow map)
         this.bloomComposer = new EffectComposer(renderer);
         this.bloomComposer.renderToScreen = false;
+        this.bloomComposer.setSize(virtualW, virtualH);
         this.bloomComposer.addPass(new RenderPass(scene, camera));
 
         this.bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 1.5, 0.4, 0.85);
@@ -23,6 +31,7 @@ export class PostProcessingManager {
 
         // 2. FINAL COMPOSER
         this.finalComposer = new EffectComposer(renderer);
+        this.finalComposer.setSize(width, height);
         this.finalComposer.addPass(new RenderPass(scene, camera));
 
         // 3. OUTLINE PASS (Selection highlight)
@@ -82,9 +91,14 @@ export class PostProcessingManager {
     }
 
     resize(width, height) {
-        this.bloomComposer.setSize(width, height);
+        const ratio = width / height;
+
+        const virtualH = this.INTERNAL_HEIGHT;
+        const virtualW = virtualH * ratio;
+
+        this.bloomComposer.setSize(virtualW, virtualH);
         this.finalComposer.setSize(width, height);
-        this.bloomPass.resolution.set(width, height);
+        this.bloomPass.resolution.set(virtualW, virtualH);
         this.outlinePass.setSize(width, height);
     }
 
