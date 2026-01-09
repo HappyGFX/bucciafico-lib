@@ -1,6 +1,6 @@
 {
   "name": "bucciafico-lib",
-  "version": "1.0.9",
+  "version": "1.0.7",
   "description": "Modular 3D rendering engine for Minecraft skins based on Three.js",
   "type": "module",
   "main": "./index.js",
