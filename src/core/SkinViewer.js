@@ -105,7 +105,7 @@ export class SkinViewer {
      * @returns {Object} The registered plugin instance.
      */
     addPlugin(plugin) {
-        const name = plugin.constructor.name;
+        const name = plugin.name || plugin.constructor.name;
         if (this.plugins.has(name)) return this.plugins.get(name);
 
         if (plugin.init) plugin.init(this);
