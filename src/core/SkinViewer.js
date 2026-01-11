@@ -4,6 +4,7 @@ import { SceneSetup } from '../objects/SceneSetup.js';
 import { SkinModel } from '../objects/SkinModel.js';
 import { detectSlimSkin } from '../utils/SkinUtils.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
+import {EventManager} from "../managers/EventManager.js";
 
 /**
  * Core 3D Viewer class.
@@ -39,6 +40,12 @@ export class SkinViewer {
 
         this.isVisible = true;
         this.needsRender = true;
+
+        this.events = new EventManager();
+
+        this.on = this.events.on.bind(this.events);
+        this.off = this.events.off.bind(this.events);
+        this.emit = this.events.emit.bind(this.events);
 
         // --- 1. RENDERER SETUP ---
         this.renderer = new THREE.WebGLRenderer({
@@ -89,6 +96,7 @@ export class SkinViewer {
 
         // --- 3. START LOOP ---
         this.animate = this.animate.bind(this);
+        this.emit('viewer:ready', this);
         this.animate();
     }
 
@@ -131,6 +139,8 @@ export class SkinViewer {
      * @returns {Promise<boolean>} isSlim
      */
     loadSkin(imageUrl) {
+        this.emit('skin:loading', imageUrl);
+
         return new Promise((resolve, reject) => {
             new THREE.TextureLoader().load(imageUrl, (texture) => {
                 texture.magFilter = THREE.NearestFilter;
@@ -147,8 +157,14 @@ export class SkinViewer {
                 this.skinData = { type: 'url', value: imageUrl };
 
                 this.requestRender();
+
+                this.emit('skin:loaded', { isSlim, texture });
+
                 resolve(isSlim);
-            }, undefined, reject);
+            }, undefined, (err) => {
+                this.emit('skin:error', err);
+                reject(err);
+            });
         });
     }
 
@@ -216,6 +232,7 @@ export class SkinViewer {
     }
 
     dispose() {
+        this.emit('viewer:dispose');
         this.isDisposed = true;
         this.observer.disconnect();
 

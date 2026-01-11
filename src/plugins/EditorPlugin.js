@@ -164,7 +164,7 @@ export class EditorPlugin {
         if (fx) fx.setSelected(obj);
 
         // Callback support (can be injected)
-        if (this.viewer.onSelectionChanged) this.viewer.onSelectionChanged(obj);
+        this.viewer.emit('selection:change', obj);
     }
 
     deselect() {
@@ -173,7 +173,7 @@ export class EditorPlugin {
         const fx = this.viewer.getPlugin('EffectsPlugin');
         if (fx) fx.setSelected(null);
 
-        if (this.viewer.onSelectionChanged) this.viewer.onSelectionChanged(null);
+        this.viewer.emit('selection:cleared');
     }
 
     /**
