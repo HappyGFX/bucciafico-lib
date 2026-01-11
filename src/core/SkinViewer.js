@@ -3,6 +3,8 @@ import { CameraManager } from '../managers/CameraManager.js';
 import { SceneSetup } from '../objects/SceneSetup.js';
 import { SkinModel } from '../objects/SkinModel.js';
 import { detectSlimSkin } from '../utils/SkinUtils.js';
+import {disposeObjectTree} from "../utils/ThreeUtils.js";
+import {EventManager} from "../managers/EventManager.js";
 
 /**
  * Core 3D Viewer class.
@@ -30,6 +32,9 @@ export class SkinViewer {
             ...config
         };
 
+        this.skinData = null;
+        this.capeData = null;
+
         /** @type {Map<string, Object>} Registered plugins. */
         this.plugins = new Map();
 
@@ -38,6 +43,12 @@ export class SkinViewer {
 
         this.isVisible = true;
         this.needsRender = true;
+
+        this.events = new EventManager();
+
+        this.on = this.events.on.bind(this.events);
+        this.off = this.events.off.bind(this.events);
+        this.emit = this.events.emit.bind(this.events);
 
         // --- 1. RENDERER SETUP ---
         this.renderer = new THREE.WebGLRenderer({
@@ -88,6 +99,7 @@ export class SkinViewer {
 
         // --- 3. START LOOP ---
         this.animate = this.animate.bind(this);
+        this.emit('viewer:ready', this);
         this.animate();
     }
 
@@ -130,8 +142,13 @@ export class SkinViewer {
      * @returns {Promise<boolean>} isSlim
      */
     loadSkin(imageUrl) {
+        this.emit('skin:loading', imageUrl);
+
         return new Promise((resolve, reject) => {
-            new THREE.TextureLoader().load(imageUrl, (texture) => {
+            const loader = new THREE.TextureLoader();
+            loader.setCrossOrigin('anonymous');
+
+            loader.load(imageUrl, (texture) => {
                 texture.magFilter = THREE.NearestFilter;
                 texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -145,9 +162,20 @@ export class SkinViewer {
                 this.skinModel.setPose(currentPose);
                 this.skinData = { type: 'url', value: imageUrl };
 
+                const fxPlugin = this.getPlugin('EffectsPlugin');
+                if (fxPlugin) {
+                    fxPlugin.forceUpdate();
+                }
+
                 this.requestRender();
+
+                this.emit('skin:loaded', { isSlim, texture });
+
                 resolve(isSlim);
-            }, undefined, reject);
+            }, undefined, (err) => {
+                this.emit('skin:error', err);
+                reject(err);
+            });
         });
     }
 
@@ -161,12 +189,111 @@ export class SkinViewer {
         });
     }
 
+    /**
+     * Loads a cape from URL.
+     * @param {string} imageUrl
+     */
+    loadCape(imageUrl) {
+        return new Promise((resolve, reject) => {
+            const loader = new THREE.TextureLoader();
+            loader.setCrossOrigin('anonymous');
+
+            loader.load(
+                imageUrl,
+                (texture) => {
+                    texture.magFilter = THREE.NearestFilter;
+                    texture.colorSpace = THREE.SRGBColorSpace;
+
+                    texture.needsUpdate = true;
+
+                    this.skinModel.setCape(texture);
+
+                    const fxPlugin = this.getPlugin('EffectsPlugin');
+                    if (fxPlugin) {
+                        fxPlugin.forceUpdate();
+                    }
+
+                    this.capeData = { type: 'url', value: imageUrl };
+
+                    this.requestRender();
+                    this.emit('cape:loaded', imageUrl);
+                    resolve();
+                },
+                undefined,
+                (err) => {
+                    console.error("Error loading cape texture:", err);
+                    reject(err);
+                }
+            );
+        });
+    }
+
+
+    /**
+     * Loads a cape by username using capes.dev API.
+     * Supports Official, Optifine, LabyMod, etc.
+     * @param {string} username
+     */
+    async loadCapeByUsername(username) {
+        this.emit('cape:loading', username);
+
+        try {
+            const response = await fetch(`https://api.capes.dev/load/${username}`);
+
+            if (!response.ok) {
+                throw new Error(`User not found in capes.dev (Status: ${response.status})`);
+            }
+
+            const data = await response.json();
+            let capeUrl = null;
+
+            if (data.minecraft?.exists && data.minecraft?.imageUrl) {
+                capeUrl = data.minecraft.imageUrl;
+            } else if (data.optifine?.exists && data.optifine?.imageUrl) {
+                capeUrl = data.optifine.imageUrl;
+            } else if (data.labymod?.exists && data.labymod?.imageUrl) {
+                capeUrl = data.labymod.imageUrl;
+            } else if (data.tlauncher?.exists && data.tlauncher?.imageUrl) {
+                capeUrl = data.tlauncher.imageUrl;
+            }
+
+            if (capeUrl) {
+                await this.loadCape(capeUrl);
+                this.capeData = { type: 'username', value: username };
+                return true;
+            } else {
+                this.resetCape();
+                return false;
+            }
+
+        } catch (e) {
+            this.emit('cape:error', e);
+            return false;
+        }
+    }
+
+    resetCape() {
+        this.skinModel.setCape(null);
+        this.capeData = null;
+        this.requestRender();
+        this.emit('cape:removed');
+    }
+
     setPose(poseData) {
         // Record history if Editor is present
         const editor = this.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();
 
         this.skinModel.setPose(poseData);
+        this.requestRender();
+    }
+
+    /**
+     * Updates lighting intensity.
+     * @param {Object} config - { global, main, fill }
+     */
+    setEnvironment(config) {
+        this.sceneSetup.setLightConfig(config);
         this.requestRender();
     }
 
@@ -215,19 +342,37 @@ export class SkinViewer {
     }
 
     dispose() {
+        this.emit('viewer:dispose');
         this.isDisposed = true;
         this.observer.disconnect();
 
-        if (this.container && this.renderer.domElement) {
-            this.container.removeChild(this.renderer.domElement);
-        }
-
-        this.renderer.dispose();
-
-        // Dispose all plugins
         this.plugins.forEach(p => {
             if (p.dispose) p.dispose();
         });
         this.plugins.clear();
+
+        if (this.skinModel) {
+            this.skinModel.dispose();
+        }
+
+        disposeObjectTree(this.scene);
+        disposeObjectTree(this.overlayScene);
+
+        if (this.cameraManager) {
+            this.cameraManager.controls.dispose();
+        }
+
+        if (this.renderer) {
+            this.renderer.dispose();
+            this.renderer.forceContextLoss();
+
+            if (this.container && this.renderer.domElement) {
+                this.container.removeChild(this.renderer.domElement);
+            }
+            this.renderer.domElement = null;
+            this.renderer = null;
+        }
+
+        this.events.dispose();
     }
 }

@@ -131,4 +131,28 @@ export class PostProcessingManager {
         this.bloomPass.radius = Number(rad);
         this.bloomPass.threshold = Number(thr);
     }
+
+    dispose() {
+        if (this.bloomComposer) {
+            this.bloomComposer.renderTarget1.dispose();
+            this.bloomComposer.renderTarget2.dispose();
+        }
+
+        if (this.finalComposer) {
+            this.finalComposer.renderTarget1.dispose();
+            this.finalComposer.renderTarget2.dispose();
+        }
+
+        if (this.bloomPass) {
+            this.bloomPass.dispose();
+        }
+
+        if (this.outlinePass) {
+            this.outlinePass.dispose();
+        }
+
+        if (this.mixPass && this.mixPass.material) {
+            this.mixPass.material.dispose();
+        }
+    }
 }

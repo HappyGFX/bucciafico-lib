@@ -39,6 +39,13 @@ export class EditorPlugin {
             }
         });
 
+        this.transformControl.addEventListener('change', () => {
+            if (this.transformControl.object) {
+                this.viewer.emit('transform:change', this.transformControl.object);
+            }
+        });
+
+
         this.viewer.overlayScene.add(this.transformControl);
     }
 
@@ -126,7 +133,10 @@ export class EditorPlugin {
 
         this.raycaster.setFromCamera(this.mouse, this.viewer.cameraManager.camera);
 
-        let objectsToCheck = [...this.viewer.skinModel.getGroup().children];
+        let objectsToCheck = [];
+
+        const playerGroup = this.viewer.skinModel.getGroup();
+        if (playerGroup) objectsToCheck.push(playerGroup);
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -136,20 +146,27 @@ export class EditorPlugin {
         const intersects = this.raycaster.intersectObjects(objectsToCheck, true);
 
         if (intersects.length > 0) {
-            let target = intersects[0].object;
+            let hitObject = intersects[0].object;
+            let logicalTarget = hitObject;
 
-            const skinGroup = this.viewer.skinModel.getGroup();
-            let temp = target;
-            while(temp) {
-                if (temp.parent === skinGroup) {
-                    target = temp;
+            while (logicalTarget.parent) {
+                if (logicalTarget.parent === playerGroup) {
                     break;
                 }
-                temp = temp.parent;
+                if (logicalTarget.parent.type === 'Scene') {
+                    break;
+                }
+                if (logicalTarget === playerGroup) {
+                    break;
+                }
+
+                logicalTarget = logicalTarget.parent;
             }
 
-            if (this.transformControl.object !== target) {
-                this.selectObject(target);
+            if (!logicalTarget) logicalTarget = hitObject;
+
+            if (this.transformControl.object !== logicalTarget) {
+                this.selectObject(logicalTarget);
             }
         } else {
             this.deselect();
@@ -164,7 +181,7 @@ export class EditorPlugin {
         if (fx) fx.setSelected(obj);
 
         // Callback support (can be injected)
-        if (this.viewer.onSelectionChanged) this.viewer.onSelectionChanged(obj);
+        this.viewer.emit('selection:change', obj);
     }
 
     deselect() {
@@ -173,7 +190,7 @@ export class EditorPlugin {
         const fx = this.viewer.getPlugin('EffectsPlugin');
         if (fx) fx.setSelected(null);
 
-        if (this.viewer.onSelectionChanged) this.viewer.onSelectionChanged(null);
+        this.viewer.emit('selection:cleared');
     }
 
     /**
@@ -207,7 +224,21 @@ export class EditorPlugin {
     }
 
     dispose() {
-        this.viewer.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
-        this.transformControl.dispose();
+        if (this.viewer.renderer.domElement) {
+            this.viewer.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
+            this.viewer.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
+        }
+
+        if (this.transformControl) {
+            this.transformControl.detach();
+            this.transformControl.object = undefined;
+
+            if (this.transformControl.parent) {
+                this.transformControl.parent.remove(this.transformControl);
+            }
+
+            this.transformControl.dispose();
+            this.transformControl = null;
+        }
     }
 }

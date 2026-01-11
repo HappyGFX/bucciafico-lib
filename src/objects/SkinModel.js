@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { applySkinUVs } from '../utils/SkinUtils.js';
 import { createVoxelLayer } from '../utils/Voxelizer.js';
 import { createGlowMaterial } from '../materials/GlowMaterial.js';
+import {disposeObjectTree} from "../utils/ThreeUtils.js";
 
 /**
  * Represents the Minecraft Character Model (Steve/Alex).
@@ -16,6 +17,8 @@ export class SkinModel {
         this.bodyMeshes = [];
         this.defaultPositions = {};
         this.blackMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+        this.LAYERS_COUNT = 20;
     }
 
     /**
@@ -59,15 +62,30 @@ export class SkinModel {
             this.bodyMeshes.push(voxelMesh);
         }
 
-        // 3. Glow Mesh (Copy of geometry for shader)
+        // 3. Glow Meshes (Multi-Layer Shells)
         const glowParts = [innerGeo.clone()];
         if (voxelGeo) glowParts.push(voxelGeo.clone());
-        const glowGeo = BufferGeometryUtils.mergeGeometries(glowParts, false);
-        const glowMat = createGlowMaterial(size.h);
-        const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-        glowMesh.userData.glowMat = glowMat;
-        this.glowMeshes.push(glowMesh);
-        meshGroup.add(glowMesh);
+        const baseGlowGeo = BufferGeometryUtils.mergeGeometries(glowParts, false);
+
+        const partLayers = [];
+
+        for (let i = 0; i < this.LAYERS_COUNT; i++) {
+            const glowMat = createGlowMaterial(size.h);
+
+            glowMat.uniforms.thickness.value = 0;
+            glowMat.uniforms.opacity.value = 0;
+
+            const layerMesh = new THREE.Mesh(baseGlowGeo, glowMat);
+
+            layerMesh.userData.layerIndex = i;
+            layerMesh.userData.isGlow = true;
+            layerMesh.userData.glowMat = glowMat;
+
+            meshGroup.add(layerMesh);
+            partLayers.push(layerMesh);
+        }
+
+        this.glowMeshes.push(partLayers);
 
         pivotGroup.add(meshGroup);
         return pivotGroup;
@@ -79,7 +97,24 @@ export class SkinModel {
      * @param {boolean} isSlim - True for Alex model (3px arms), False for Steve (4px arms).
      */
     build(texture, isSlim = false) {
-        this.playerGroup.clear();
+        let capeBackup = null;
+        if (this.parts.cape) {
+            const mesh = this.parts.cape.children.find(c => c.isMesh);
+            if (mesh && mesh.material.map) {
+                capeBackup = {
+                    texture: mesh.material.map,
+                    position: this.parts.cape.position.clone(),
+                    rotation: this.parts.cape.rotation.clone(),
+                    scale: this.parts.cape.scale.clone()
+                };
+            }
+        }
+
+        if (this.playerGroup.children.length > 0) {
+            disposeObjectTree(this.playerGroup);
+            this.playerGroup.clear();
+        }
+
         this.parts = {};
         this.glowMeshes = [];
         this.bodyMeshes = [];
@@ -102,13 +137,132 @@ export class SkinModel {
             this.parts[name] = part;
             this.playerGroup.add(part);
         }
+
+        if (capeBackup) {
+            this.setCape(capeBackup.texture);
+
+            if (this.parts.cape) {
+                this.parts.cape.position.copy(capeBackup.position);
+                this.parts.cape.rotation.copy(capeBackup.rotation);
+                this.parts.cape.scale.copy(capeBackup.scale);
+            }
+        }
+    }
+
+    /**
+     * Adds or updates the Cape mesh.
+     * @param {THREE.Texture} texture
+     */
+    setCape(texture) {
+        if (this.parts.cape) {
+            if (this.parts.cape.userData.glowLayers) {
+                const layersToRemove = this.parts.cape.userData.glowLayers;
+                this.glowMeshes = this.glowMeshes.filter(layers => layers !== layersToRemove);
+            }
+
+            this.playerGroup.remove(this.parts.cape);
+            disposeObjectTree(this.parts.cape);
+            delete this.parts.cape;
+        }
+
+        if (!texture) return;
+
+        const size = { w: 10, h: 16, d: 1 };
+        const pivotPos = new THREE.Vector3(0, 0, -3);
+        const meshOffset = new THREE.Vector3(0, -8, 0.6);
+
+        const pivotGroup = new THREE.Group();
+        pivotGroup.position.copy(pivotPos);
+        pivotGroup.name = 'cape';
+        pivotGroup.rotation.x = 0.2;
+
+        this.defaultPositions['cape'] = pivotPos.clone();
+
+        const geo = new THREE.BoxGeometry(size.w, size.h, size.d);
+        applySkinUVs(geo, 0, 0, 10, 16, 1, 64, 32);
+
+        const mat = new THREE.MeshStandardMaterial({
+            map: texture,
+            side: THREE.DoubleSide,
+            transparent: true,
+            alphaTest: 0.5
+        });
+
+        const mainMesh = new THREE.Mesh(geo, mat);
+        mainMesh.position.copy(meshOffset);
+        mainMesh.rotation.y = Math.PI;
+        mainMesh.userData.originalMat = mat;
+
+        pivotGroup.add(mainMesh);
+        this.bodyMeshes.push(mainMesh);
+
+        const capeLayers = [];
+        const shellGeo = geo.clone();
+
+        for (let i = 0; i < this.LAYERS_COUNT; i++) {
+            const glowMat = createGlowMaterial(size.h);
+
+            glowMat.uniforms.thickness.value = 0;
+            glowMat.uniforms.opacity.value = 0;
+            glowMat.polygonOffset = true;
+            glowMat.polygonOffsetFactor = i * 0.1;
+
+            const layerMesh = new THREE.Mesh(shellGeo, glowMat);
+
+            layerMesh.position.copy(meshOffset);
+            layerMesh.rotation.y = Math.PI;
+
+            layerMesh.userData.layerIndex = i;
+            layerMesh.userData.isGlow = true;
+            layerMesh.userData.glowMat = glowMat;
+
+            pivotGroup.add(layerMesh);
+            capeLayers.push(layerMesh);
+        }
+
+        this.glowMeshes.push(capeLayers);
+        pivotGroup.userData.glowLayers = capeLayers;
+
+        this.playerGroup.add(pivotGroup);
+        this.parts['cape'] = pivotGroup;
     }
 
     getGroup() { return this.playerGroup; }
 
-    updateBorderThickness(v) { const t = v * 0.05; this.glowMeshes.forEach(m => m.userData.glowMat.uniforms.thickness.value = t); }
-    updateGlowHeight(p) { this.glowMeshes.forEach(m => m.userData.glowMat.uniforms.gradientLimit.value = p); }
-    setGlowEffect(en) { this.glowMeshes.forEach(m => m.userData.glowMat.uniforms.opacity.value = en ? 1.0 : 0.0); }
+    /**
+     * Updates thickness creating a solid volume effect.
+     * @param {number} v - Base thickness value.
+     */
+    updateBorderThickness(v) {
+        const maxThickness = v * 0.05;
+
+        this.glowMeshes.forEach(layers => {
+            layers.forEach((mesh, i) => {
+                const progress = (i + 1) / this.LAYERS_COUNT;
+
+                mesh.userData.glowMat.uniforms.thickness.value = maxThickness * progress;
+            });
+        });
+    }
+
+    updateGlowHeight(p) {
+        this.glowMeshes.forEach(layers => {
+            layers.forEach(m => m.userData.glowMat.uniforms.gradientLimit.value = p);
+        });
+    }
+
+    setGlowEffect(en) {
+        this.glowMeshes.forEach(layers => {
+            layers.forEach((mesh, i) => {
+                if (!en) {
+                    mesh.userData.glowMat.uniforms.opacity.value = 0.0;
+                } else {
+                    mesh.userData.glowMat.uniforms.opacity.value = 1.0 / (this.LAYERS_COUNT * 0.6);
+                }
+            });
+        });
+    }
+
     darkenBody() { this.bodyMeshes.forEach(m => m.material = this.blackMaterial); }
     restoreBody() { this.bodyMeshes.forEach(m => m.material = m.userData.originalMat); }
 
@@ -117,8 +271,22 @@ export class SkinModel {
             part.rotation.set(0,0,0);
             if (this.defaultPositions[name]) part.position.copy(this.defaultPositions[name]);
         }
+
+        this.playerGroup.position.set(0, 0, 0);
+        this.playerGroup.rotation.set(0, 0, 0);
+        this.playerGroup.scale.set(1, 1, 1);
+
         if (!pose) return;
+
+        if (pose.root) {
+            if (pose.root.pos) this.playerGroup.position.fromArray(pose.root.pos);
+            if (pose.root.rot) this.playerGroup.rotation.fromArray(pose.root.rot);
+            if (pose.root.scl) this.playerGroup.scale.fromArray(pose.root.scl);
+        }
+
         for (const [name, data] of Object.entries(pose)) {
+            if (name === 'root') continue;
+
             if (this.parts[name]) {
                 if(data.rot) this.parts[name].rotation.set(...data.rot);
                 if(data.pos) this.parts[name].position.set(...data.pos);
@@ -129,9 +297,34 @@ export class SkinModel {
     getPose() {
         const pose = {};
         const f = (n) => parseFloat(n.toFixed(3));
+
         for (const [name, part] of Object.entries(this.parts)) {
-            pose[name] = { rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)], pos: [f(part.position.x), f(part.position.y), f(part.position.z)] };
+            pose[name] = {
+                rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)],
+                pos: [f(part.position.x), f(part.position.y), f(part.position.z)]
+            };
         }
+
+        pose.root = {
+            pos: [f(this.playerGroup.position.x), f(this.playerGroup.position.y), f(this.playerGroup.position.z)],
+            rot: [f(this.playerGroup.rotation.x), f(this.playerGroup.rotation.y), f(this.playerGroup.rotation.z)],
+            scl: [f(this.playerGroup.scale.x), f(this.playerGroup.scale.y), f(this.playerGroup.scale.z)]
+        };
+
         return pose;
+    }
+
+    dispose() {
+        if (this.playerGroup) {
+            if (this.playerGroup.parent) {
+                this.playerGroup.parent.remove(this.playerGroup);
+            }
+            disposeObjectTree(this.playerGroup);
+        }
+
+        this.parts = {};
+        this.glowMeshes = [];
+        this.bodyMeshes = [];
+        this.playerGroup = null;
     }
 }

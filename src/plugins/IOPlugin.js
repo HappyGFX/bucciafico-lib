@@ -20,11 +20,11 @@ export class IOPlugin {
      * @param {boolean} options.pose - Include character pose.
      * @param {boolean} options.items - Include items.
      */
-    exportState(options = { skin: true, camera: true, effects: true, pose: true, items: true }) {
+    exportState(options = { skin: true, camera: true, effects: true, pose: true, items: true, env: true }) {
         const state = {
             meta: {
                 generator: "Bucciafico Studio",
-                version: "1.0.7",
+                version: "1.0.8",
                 timestamp: Date.now()
             },
             core: {}
@@ -32,6 +32,7 @@ export class IOPlugin {
 
         if (options.skin) {
             state.core.skin = this.viewer.skinData || null;
+            state.core.cape = this.viewer.capeData || null;
         }
 
         // 2. Camera & Config
@@ -44,12 +45,17 @@ export class IOPlugin {
             };
         }
 
-        // 3. Pose
+        // 3. Environment
+        if (options.env) {
+            state.environment = this.viewer.sceneSetup.getLightConfig();
+        }
+
+        // 4. Pose
         if (options.pose) {
             state.pose = this.viewer.skinModel.getPose();
         }
 
-        // 4. Effects
+        // 5. Effects
         if (options.effects) {
             const effectsPlugin = this.viewer.getPlugin('EffectsPlugin');
             if (effectsPlugin) {
@@ -59,7 +65,7 @@ export class IOPlugin {
             }
         }
 
-        // 5. Items
+        // 6. Items
         if (options.items) {
             const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
             if (itemsPlugin && itemsPlugin.items.length > 0) {
@@ -67,6 +73,7 @@ export class IOPlugin {
                     name: item.name,
                     uuid: item.uuid,
                     sourceUrl: item.userData.sourceUrl || null,
+                    parentId: item.userData.parentId || null,
                     transform: {
                         pos: item.position.toArray(),
                         rot: item.rotation.toArray(),
@@ -103,27 +110,42 @@ export class IOPlugin {
             this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
         }
 
-        // 3. Skin (Async)
+        // 3. Environment
+        if (data.environment) {
+            this.viewer.setEnvironment(data.environment);
+        }
+
+        const loadPromises = [];
+
+        // 4. Skin/Cape (Async)
         if (data.core?.skin) {
             const skinInfo = data.core.skin;
-            try {
-                if (skinInfo.type === 'username') {
-                    await this.viewer.loadSkinByUsername(skinInfo.value);
-                } else if (skinInfo.value) {
-                    await this.viewer.loadSkin(skinInfo.value);
-                }
-            } catch (e) {
-                console.warn("Failed to load skin from import:", e);
+            if (skinInfo.type === 'username') {
+                loadPromises.push(this.viewer.loadSkinByUsername(skinInfo.value));
+            } else if (skinInfo.value) {
+                loadPromises.push(this.viewer.loadSkin(skinInfo.value));
             }
         }
 
-        // 4. Effects
+        if (data.core?.cape) {
+            const capeInfo = data.core.cape;
+            if (capeInfo.type === 'username') {
+                loadPromises.push(this.viewer.loadCapeByUsername(capeInfo.value));
+            } else if (capeInfo.value) {
+                loadPromises.push(this.viewer.loadCape(capeInfo.value));
+            }
+        } else {
+            // Jeśli w JSON nie ma peleryny, a w viewerze jest, to ją czyścimy
+            this.viewer.resetCape();
+        }
+
+        // 5. Effects
         if (data.effects?.backlight) {
             const fx = this.viewer.getPlugin('EffectsPlugin');
             if (fx) fx.updateConfig(data.effects.backlight);
         }
 
-        // 5. Items (Async & Complex)
+        // 6. Items (Async & Complex)
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
             [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
@@ -134,6 +156,11 @@ export class IOPlugin {
 
                     try {
                         const mesh = await itemsPlugin.addItem(itemData.sourceUrl, itemData.name);
+
+                        if (itemData.parentId) {
+                            itemsPlugin.attachItem(mesh, itemData.parentId);
+                        }
+
                         // Apply Transform
                         if (itemData.transform) {
                             mesh.position.fromArray(itemData.transform.pos);
@@ -148,9 +175,11 @@ export class IOPlugin {
             }
         }
 
-        // 6. Pose
+        // 7. Pose
         if (data.pose) {
             this.viewer.setPose(data.pose);
         }
+
+        await Promise.all(loadPromises);
     }
 }
