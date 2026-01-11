@@ -133,7 +133,10 @@ export class EditorPlugin {
 
         this.raycaster.setFromCamera(this.mouse, this.viewer.cameraManager.camera);
 
-        let objectsToCheck = [...this.viewer.skinModel.getGroup().children];
+        let objectsToCheck = [];
+
+        const playerGroup = this.viewer.skinModel.getGroup();
+        if (playerGroup) objectsToCheck.push(playerGroup);
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -143,20 +146,27 @@ export class EditorPlugin {
         const intersects = this.raycaster.intersectObjects(objectsToCheck, true);
 
         if (intersects.length > 0) {
-            let target = intersects[0].object;
+            let hitObject = intersects[0].object;
+            let logicalTarget = hitObject;
 
-            const skinGroup = this.viewer.skinModel.getGroup();
-            let temp = target;
-            while(temp) {
-                if (temp.parent === skinGroup) {
-                    target = temp;
+            while (logicalTarget.parent) {
+                if (logicalTarget.parent === playerGroup) {
                     break;
                 }
-                temp = temp.parent;
+                if (logicalTarget.parent.type === 'Scene') {
+                    break;
+                }
+                if (logicalTarget === playerGroup) {
+                    break;
+                }
+
+                logicalTarget = logicalTarget.parent;
             }
 
-            if (this.transformControl.object !== target) {
-                this.selectObject(target);
+            if (!logicalTarget) logicalTarget = hitObject;
+
+            if (this.transformControl.object !== logicalTarget) {
+                this.selectObject(logicalTarget);
             }
         } else {
             this.deselect();

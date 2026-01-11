@@ -170,8 +170,22 @@ export class SkinModel {
             part.rotation.set(0,0,0);
             if (this.defaultPositions[name]) part.position.copy(this.defaultPositions[name]);
         }
+
+        this.playerGroup.position.set(0, 0, 0);
+        this.playerGroup.rotation.set(0, 0, 0);
+        this.playerGroup.scale.set(1, 1, 1);
+
         if (!pose) return;
+
+        if (pose.root) {
+            if (pose.root.pos) this.playerGroup.position.fromArray(pose.root.pos);
+            if (pose.root.rot) this.playerGroup.rotation.fromArray(pose.root.rot);
+            if (pose.root.scl) this.playerGroup.scale.fromArray(pose.root.scl);
+        }
+
         for (const [name, data] of Object.entries(pose)) {
+            if (name === 'root') continue;
+
             if (this.parts[name]) {
                 if(data.rot) this.parts[name].rotation.set(...data.rot);
                 if(data.pos) this.parts[name].position.set(...data.pos);
@@ -182,9 +196,20 @@ export class SkinModel {
     getPose() {
         const pose = {};
         const f = (n) => parseFloat(n.toFixed(3));
+
         for (const [name, part] of Object.entries(this.parts)) {
-            pose[name] = { rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)], pos: [f(part.position.x), f(part.position.y), f(part.position.z)] };
+            pose[name] = {
+                rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)],
+                pos: [f(part.position.x), f(part.position.y), f(part.position.z)]
+            };
         }
+
+        pose.root = {
+            pos: [f(this.playerGroup.position.x), f(this.playerGroup.position.y), f(this.playerGroup.position.z)],
+            rot: [f(this.playerGroup.rotation.x), f(this.playerGroup.rotation.y), f(this.playerGroup.rotation.z)],
+            scl: [f(this.playerGroup.scale.x), f(this.playerGroup.scale.y), f(this.playerGroup.scale.z)]
+        };
+
         return pose;
     }
 
