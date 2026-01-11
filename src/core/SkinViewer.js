@@ -188,6 +188,15 @@ export class SkinViewer {
     }
 
     /**
+     * Updates lighting intensity.
+     * @param {Object} config - { global, main, fill }
+     */
+    setEnvironment(config) {
+        this.sceneSetup.setLightConfig(config);
+        this.requestRender();
+    }
+
+    /**
      * Handles window resize. Should be called by the implementation layer.
      */
     onResize() {

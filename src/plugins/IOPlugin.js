@@ -20,7 +20,7 @@ export class IOPlugin {
      * @param {boolean} options.pose - Include character pose.
      * @param {boolean} options.items - Include items.
      */
-    exportState(options = { skin: true, camera: true, effects: true, pose: true, items: true }) {
+    exportState(options = { skin: true, camera: true, effects: true, pose: true, items: true, env: true }) {
         const state = {
             meta: {
                 generator: "Bucciafico Studio",
@@ -44,12 +44,17 @@ export class IOPlugin {
             };
         }
 
-        // 3. Pose
+        // 3. Environment
+        if (options.env) {
+            state.environment = this.viewer.sceneSetup.getLightConfig();
+        }
+
+        // 4. Pose
         if (options.pose) {
             state.pose = this.viewer.skinModel.getPose();
         }
 
-        // 4. Effects
+        // 5. Effects
         if (options.effects) {
             const effectsPlugin = this.viewer.getPlugin('EffectsPlugin');
             if (effectsPlugin) {
@@ -59,7 +64,7 @@ export class IOPlugin {
             }
         }
 
-        // 5. Items
+        // 6. Items
         if (options.items) {
             const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
             if (itemsPlugin && itemsPlugin.items.length > 0) {
@@ -103,7 +108,12 @@ export class IOPlugin {
             this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
         }
 
-        // 3. Skin (Async)
+        // 3. Environment
+        if (data.environment) {
+            this.viewer.setEnvironment(data.environment);
+        }
+
+        // 4. Skin (Async)
         if (data.core?.skin) {
             const skinInfo = data.core.skin;
             try {
@@ -117,13 +127,13 @@ export class IOPlugin {
             }
         }
 
-        // 4. Effects
+        // 5. Effects
         if (data.effects?.backlight) {
             const fx = this.viewer.getPlugin('EffectsPlugin');
             if (fx) fx.updateConfig(data.effects.backlight);
         }
 
-        // 5. Items (Async & Complex)
+        // 6. Items (Async & Complex)
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
             [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
@@ -148,7 +158,7 @@ export class IOPlugin {
             }
         }
 
-        // 6. Pose
+        // 7. Pose
         if (data.pose) {
             this.viewer.setPose(data.pose);
         }
