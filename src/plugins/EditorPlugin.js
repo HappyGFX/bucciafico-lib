@@ -39,6 +39,13 @@ export class EditorPlugin {
             }
         });
 
+        this.transformControl.addEventListener('change', () => {
+            if (this.transformControl.object) {
+                this.viewer.emit('transform:change', this.transformControl.object);
+            }
+        });
+
+
         this.viewer.overlayScene.add(this.transformControl);
     }
 
