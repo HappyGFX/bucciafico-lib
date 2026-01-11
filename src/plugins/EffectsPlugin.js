@@ -8,7 +8,13 @@ import { PostProcessingManager } from '../managers/PostProcessingManager.js';
 export class EffectsPlugin {
     constructor() {
         this.name = 'EffectsPlugin';
-        this.isEnabled = false;
+        this.state = {
+            enabled: false,
+            strength: 0,
+            radius: 0,
+            height: 0.5,
+            thickness: 4
+        };
     }
 
     init(viewer) {
@@ -26,12 +32,30 @@ export class EffectsPlugin {
      * @param {Object} config - { enabled, strength, radius, height, thickness }
      */
     updateConfig(config) {
-        this.isEnabled = config.enabled;
+        this.state = { ...this.state, ...config };
 
+        this._applyToScene();
+    }
+
+    /**
+     * Re-applies the current internal state to the 3D model.
+     * Useful when the model has been rebuilt (skin change).
+     */
+    forceUpdate() {
+        this._applyToScene();
+    }
+
+    /**
+     * Internal method to push state to shaders and composer.
+     */
+    _applyToScene() {
+        const config = this.state;
         const skin = this.viewer.skinModel;
+
         skin.setGlowEffect(config.enabled);
-        if (config.thickness !== undefined) skin.updateBorderThickness(config.thickness);
-        if (config.height !== undefined) skin.updateGlowHeight(config.height);
+
+        skin.updateBorderThickness(config.thickness);
+        skin.updateGlowHeight(config.height);
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -61,13 +85,11 @@ export class EffectsPlugin {
         const items = itemsPlugin ? itemsPlugin.items : [];
 
         this.composer.renderSelective(
-            // 1. Prepare Bloom pass (Hide non-glowing elements)
             () => {
                 skin.darkenBody();
                 this.viewer.sceneSetup.setGridVisible(false);
                 items.forEach(i => i.material = skin.blackMaterial);
             },
-            // 2. Restore Scene for main pass
             () => {
                 skin.restoreBody();
                 this.viewer.sceneSetup.setGridVisible(this.viewer.config.showGrid);
@@ -76,6 +98,13 @@ export class EffectsPlugin {
                 });
             }
         );
+    }
+
+    /**
+     * Returns the current configuration state.
+     */
+    getConfig() {
+        return { ...this.state };
     }
 
     /**
@@ -133,30 +162,6 @@ export class EffectsPlugin {
 
         this.viewer.cameraManager.update();
         return dataUrl;
-    }
-
-    getConfig() {
-        const skin = this.viewer.skinModel;
-
-        let glowMesh = null;
-
-        if (skin.glowMeshes.length > 0) {
-            const firstPart = skin.glowMeshes[0];
-            if (Array.isArray(firstPart) && firstPart.length > 0) {
-                glowMesh = firstPart[firstPart.length - 1];
-            } else if (firstPart.isMesh) {
-                glowMesh = firstPart;
-            }
-        }
-
-        return {
-            enabled: this.isEnabled,
-            strength: this.composer.bloomPass.strength,
-            radius: this.composer.bloomPass.radius,
-
-            height: glowMesh ? glowMesh.userData.glowMat.uniforms.gradientLimit.value : 0.5,
-            thickness: glowMesh ? glowMesh.userData.glowMat.uniforms.thickness.value / 0.05 : 4
-        };
     }
 
     dispose() {

@@ -97,6 +97,19 @@ export class SkinModel {
      * @param {boolean} isSlim - True for Alex model (3px arms), False for Steve (4px arms).
      */
     build(texture, isSlim = false) {
+        let capeBackup = null;
+        if (this.parts.cape) {
+            const mesh = this.parts.cape.children.find(c => c.isMesh);
+            if (mesh && mesh.material.map) {
+                capeBackup = {
+                    texture: mesh.material.map,
+                    position: this.parts.cape.position.clone(),
+                    rotation: this.parts.cape.rotation.clone(),
+                    scale: this.parts.cape.scale.clone()
+                };
+            }
+        }
+
         if (this.playerGroup.children.length > 0) {
             disposeObjectTree(this.playerGroup);
             this.playerGroup.clear();
@@ -123,6 +136,16 @@ export class SkinModel {
             const part = this.createBodyPart(texture, def.uv, def.size, def.pivotPos, def.meshOffset, name);
             this.parts[name] = part;
             this.playerGroup.add(part);
+        }
+
+        if (capeBackup) {
+            this.setCape(capeBackup.texture);
+
+            if (this.parts.cape) {
+                this.parts.cape.position.copy(capeBackup.position);
+                this.parts.cape.rotation.copy(capeBackup.rotation);
+                this.parts.cape.scale.copy(capeBackup.scale);
+            }
         }
     }
 

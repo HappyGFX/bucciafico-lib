@@ -145,7 +145,10 @@ export class SkinViewer {
         this.emit('skin:loading', imageUrl);
 
         return new Promise((resolve, reject) => {
-            new THREE.TextureLoader().load(imageUrl, (texture) => {
+            const loader = new THREE.TextureLoader();
+            loader.setCrossOrigin('anonymous');
+
+            loader.load(imageUrl, (texture) => {
                 texture.magFilter = THREE.NearestFilter;
                 texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -158,6 +161,11 @@ export class SkinViewer {
                 this.skinModel.build(texture, isSlim);
                 this.skinModel.setPose(currentPose);
                 this.skinData = { type: 'url', value: imageUrl };
+
+                const fxPlugin = this.getPlugin('EffectsPlugin');
+                if (fxPlugin) {
+                    fxPlugin.forceUpdate();
+                }
 
                 this.requestRender();
 
@@ -201,8 +209,8 @@ export class SkinViewer {
                     this.skinModel.setCape(texture);
 
                     const fxPlugin = this.getPlugin('EffectsPlugin');
-                    if (fxPlugin && fxPlugin.isEnabled) {
-                        fxPlugin.updateConfig(fxPlugin.getConfig());
+                    if (fxPlugin) {
+                        fxPlugin.forceUpdate();
                     }
 
                     this.capeData = { type: 'url', value: imageUrl };
