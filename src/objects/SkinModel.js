@@ -17,6 +17,8 @@ export class SkinModel {
         this.bodyMeshes = [];
         this.defaultPositions = {};
         this.blackMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+        this.LAYERS_COUNT = 20;
     }
 
     /**
@@ -60,15 +62,30 @@ export class SkinModel {
             this.bodyMeshes.push(voxelMesh);
         }
 
-        // 3. Glow Mesh (Copy of geometry for shader)
+        // 3. Glow Meshes (Multi-Layer Shells)
         const glowParts = [innerGeo.clone()];
         if (voxelGeo) glowParts.push(voxelGeo.clone());
-        const glowGeo = BufferGeometryUtils.mergeGeometries(glowParts, false);
-        const glowMat = createGlowMaterial(size.h);
-        const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-        glowMesh.userData.glowMat = glowMat;
-        this.glowMeshes.push(glowMesh);
-        meshGroup.add(glowMesh);
+        const baseGlowGeo = BufferGeometryUtils.mergeGeometries(glowParts, false);
+
+        const partLayers = [];
+
+        for (let i = 0; i < this.LAYERS_COUNT; i++) {
+            const glowMat = createGlowMaterial(size.h);
+
+            glowMat.uniforms.thickness.value = 0;
+            glowMat.uniforms.opacity.value = 0;
+
+            const layerMesh = new THREE.Mesh(baseGlowGeo, glowMat);
+
+            layerMesh.userData.layerIndex = i;
+            layerMesh.userData.isGlow = true;
+            layerMesh.userData.glowMat = glowMat;
+
+            meshGroup.add(layerMesh);
+            partLayers.push(layerMesh);
+        }
+
+        this.glowMeshes.push(partLayers);
 
         pivotGroup.add(meshGroup);
         return pivotGroup;
@@ -111,9 +128,40 @@ export class SkinModel {
 
     getGroup() { return this.playerGroup; }
 
-    updateBorderThickness(v) { const t = v * 0.05; this.glowMeshes.forEach(m => m.userData.glowMat.uniforms.thickness.value = t); }
-    updateGlowHeight(p) { this.glowMeshes.forEach(m => m.userData.glowMat.uniforms.gradientLimit.value = p); }
-    setGlowEffect(en) { this.glowMeshes.forEach(m => m.userData.glowMat.uniforms.opacity.value = en ? 1.0 : 0.0); }
+    /**
+     * Updates thickness creating a solid volume effect.
+     * @param {number} v - Base thickness value.
+     */
+    updateBorderThickness(v) {
+        const maxThickness = v * 0.05;
+
+        this.glowMeshes.forEach(layers => {
+            layers.forEach((mesh, i) => {
+                const progress = (i + 1) / this.LAYERS_COUNT;
+
+                mesh.userData.glowMat.uniforms.thickness.value = maxThickness * progress;
+            });
+        });
+    }
+
+    updateGlowHeight(p) {
+        this.glowMeshes.forEach(layers => {
+            layers.forEach(m => m.userData.glowMat.uniforms.gradientLimit.value = p);
+        });
+    }
+
+    setGlowEffect(en) {
+        this.glowMeshes.forEach(layers => {
+            layers.forEach((mesh, i) => {
+                if (!en) {
+                    mesh.userData.glowMat.uniforms.opacity.value = 0.0;
+                } else {
+                    mesh.userData.glowMat.uniforms.opacity.value = 1.0 / (this.LAYERS_COUNT * 0.6);
+                }
+            });
+        });
+    }
+
     darkenBody() { this.bodyMeshes.forEach(m => m.material = this.blackMaterial); }
     restoreBody() { this.bodyMeshes.forEach(m => m.material = m.userData.originalMat); }
 

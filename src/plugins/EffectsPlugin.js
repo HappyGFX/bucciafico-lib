@@ -134,7 +134,17 @@ export class EffectsPlugin {
 
     getConfig() {
         const skin = this.viewer.skinModel;
-        const glowMesh = skin.glowMeshes[0];
+
+        let glowMesh = null;
+
+        if (skin.glowMeshes.length > 0) {
+            const firstPart = skin.glowMeshes[0];
+            if (Array.isArray(firstPart) && firstPart.length > 0) {
+                glowMesh = firstPart[firstPart.length - 1];
+            } else if (firstPart.isMesh) {
+                glowMesh = firstPart;
+            }
+        }
 
         return {
             enabled: this.isEnabled,
