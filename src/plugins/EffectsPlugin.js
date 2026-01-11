@@ -146,4 +146,11 @@ export class EffectsPlugin {
         };
     }
 
+    dispose() {
+        if (this.composer) {
+            this.composer.dispose();
+            this.composer = null;
+        }
+    }
+
 }

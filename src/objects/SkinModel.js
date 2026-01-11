@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { applySkinUVs } from '../utils/SkinUtils.js';
 import { createVoxelLayer } from '../utils/Voxelizer.js';
 import { createGlowMaterial } from '../materials/GlowMaterial.js';
+import {disposeObjectTree} from "../utils/ThreeUtils.js";
 
 /**
  * Represents the Minecraft Character Model (Steve/Alex).
@@ -79,7 +80,11 @@ export class SkinModel {
      * @param {boolean} isSlim - True for Alex model (3px arms), False for Steve (4px arms).
      */
     build(texture, isSlim = false) {
-        this.playerGroup.clear();
+        if (this.playerGroup.children.length > 0) {
+            disposeObjectTree(this.playerGroup);
+            this.playerGroup.clear();
+        }
+
         this.parts = {};
         this.glowMeshes = [];
         this.bodyMeshes = [];
@@ -133,5 +138,19 @@ export class SkinModel {
             pose[name] = { rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)], pos: [f(part.position.x), f(part.position.y), f(part.position.z)] };
         }
         return pose;
+    }
+
+    dispose() {
+        if (this.playerGroup) {
+            if (this.playerGroup.parent) {
+                this.playerGroup.parent.remove(this.playerGroup);
+            }
+            disposeObjectTree(this.playerGroup);
+        }
+
+        this.parts = {};
+        this.glowMeshes = [];
+        this.bodyMeshes = [];
+        this.playerGroup = null;
     }
 }

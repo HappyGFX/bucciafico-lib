@@ -3,6 +3,7 @@ import { CameraManager } from '../managers/CameraManager.js';
 import { SceneSetup } from '../objects/SceneSetup.js';
 import { SkinModel } from '../objects/SkinModel.js';
 import { detectSlimSkin } from '../utils/SkinUtils.js';
+import {disposeObjectTree} from "../utils/ThreeUtils.js";
 
 /**
  * Core 3D Viewer class.
@@ -218,16 +219,31 @@ export class SkinViewer {
         this.isDisposed = true;
         this.observer.disconnect();
 
-        if (this.container && this.renderer.domElement) {
-            this.container.removeChild(this.renderer.domElement);
-        }
-
-        this.renderer.dispose();
-
-        // Dispose all plugins
         this.plugins.forEach(p => {
             if (p.dispose) p.dispose();
         });
         this.plugins.clear();
+
+        if (this.skinModel) {
+            this.skinModel.dispose();
+        }
+
+        disposeObjectTree(this.scene);
+        disposeObjectTree(this.overlayScene);
+
+        if (this.cameraManager) {
+            this.cameraManager.controls.dispose();
+        }
+
+        if (this.renderer) {
+            this.renderer.dispose();
+            this.renderer.forceContextLoss();
+
+            if (this.container && this.renderer.domElement) {
+                this.container.removeChild(this.renderer.domElement);
+            }
+            this.renderer.domElement = null;
+            this.renderer = null;
+        }
     }
 }

@@ -207,7 +207,17 @@ export class EditorPlugin {
     }
 
     dispose() {
-        this.viewer.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
-        this.transformControl.dispose();
+        if (this.viewer.renderer.domElement) {
+            this.viewer.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
+            this.viewer.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
+        }
+
+        if (this.transformControl) {
+            this.transformControl.detach();
+            this.transformControl.dispose();
+            if (this.transformControl.parent) {
+                this.transformControl.parent.remove(this.transformControl);
+            }
+        }
     }
 }

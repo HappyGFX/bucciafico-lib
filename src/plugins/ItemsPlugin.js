@@ -1,4 +1,5 @@
 import { ItemFactory } from '../objects/ItemFactory.js';
+import {disposeObjectTree} from "../utils/ThreeUtils.js";
 
 /**
  * Plugin responsible for managing 3D Items (Swords, Blocks).
@@ -67,5 +68,13 @@ export class ItemsPlugin {
                 item.scale.fromArray(state.scale);
             }
         });
+    }
+
+    dispose() {
+        this.items.forEach(mesh => {
+            this.viewer.scene.remove(mesh);
+            disposeObjectTree(mesh);
+        });
+        this.items = [];
     }
 }
