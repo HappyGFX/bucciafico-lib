@@ -196,6 +196,12 @@ export class SkinViewer {
                     texture.needsUpdate = true;
 
                     this.skinModel.setCape(texture);
+
+                    const fxPlugin = this.getPlugin('EffectsPlugin');
+                    if (fxPlugin && fxPlugin.isEnabled) {
+                        fxPlugin.updateConfig(fxPlugin.getConfig());
+                    }
+
                     this.requestRender();
                     this.emit('cape:loaded', imageUrl);
                     resolve();
