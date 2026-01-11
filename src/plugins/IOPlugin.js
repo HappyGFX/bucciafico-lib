@@ -32,6 +32,7 @@ export class IOPlugin {
 
         if (options.skin) {
             state.core.skin = this.viewer.skinData || null;
+            state.core.cape = this.viewer.capeData || null;
         }
 
         // 2. Camera & Config
@@ -114,18 +115,28 @@ export class IOPlugin {
             this.viewer.setEnvironment(data.environment);
         }
 
-        // 4. Skin (Async)
+        const loadPromises = [];
+
+        // 4. Skin/Cape (Async)
         if (data.core?.skin) {
             const skinInfo = data.core.skin;
-            try {
-                if (skinInfo.type === 'username') {
-                    await this.viewer.loadSkinByUsername(skinInfo.value);
-                } else if (skinInfo.value) {
-                    await this.viewer.loadSkin(skinInfo.value);
-                }
-            } catch (e) {
-                console.warn("Failed to load skin from import:", e);
+            if (skinInfo.type === 'username') {
+                loadPromises.push(this.viewer.loadSkinByUsername(skinInfo.value));
+            } else if (skinInfo.value) {
+                loadPromises.push(this.viewer.loadSkin(skinInfo.value));
             }
+        }
+
+        if (data.core?.cape) {
+            const capeInfo = data.core.cape;
+            if (capeInfo.type === 'username') {
+                loadPromises.push(this.viewer.loadCapeByUsername(capeInfo.value));
+            } else if (capeInfo.value) {
+                loadPromises.push(this.viewer.loadCape(capeInfo.value));
+            }
+        } else {
+            // Jeśli w JSON nie ma peleryny, a w viewerze jest, to ją czyścimy
+            this.viewer.resetCape();
         }
 
         // 5. Effects
@@ -168,5 +179,7 @@ export class IOPlugin {
         if (data.pose) {
             this.viewer.setPose(data.pose);
         }
+
+        await Promise.all(loadPromises);
     }
 }

@@ -32,6 +32,9 @@ export class SkinViewer {
             ...config
         };
 
+        this.skinData = null;
+        this.capeData = null;
+
         /** @type {Map<string, Object>} Registered plugins. */
         this.plugins = new Map();
 
@@ -202,6 +205,8 @@ export class SkinViewer {
                         fxPlugin.updateConfig(fxPlugin.getConfig());
                     }
 
+                    this.capeData = { type: 'url', value: imageUrl };
+
                     this.requestRender();
                     this.emit('cape:loaded', imageUrl);
                     resolve();
@@ -246,6 +251,7 @@ export class SkinViewer {
 
             if (capeUrl) {
                 await this.loadCape(capeUrl);
+                this.capeData = { type: 'username', value: username };
                 return true;
             } else {
                 this.resetCape();
@@ -260,6 +266,7 @@ export class SkinViewer {
 
     resetCape() {
         this.skinModel.setCape(null);
+        this.capeData = null;
         this.requestRender();
         this.emit('cape:removed');
     }
