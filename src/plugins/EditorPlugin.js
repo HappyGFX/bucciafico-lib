@@ -231,10 +231,14 @@ export class EditorPlugin {
 
         if (this.transformControl) {
             this.transformControl.detach();
-            this.transformControl.dispose();
+            this.transformControl.object = undefined;
+
             if (this.transformControl.parent) {
                 this.transformControl.parent.remove(this.transformControl);
             }
+
+            this.transformControl.dispose();
+            this.transformControl = null;
         }
     }
 }

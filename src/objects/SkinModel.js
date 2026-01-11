@@ -126,6 +126,84 @@ export class SkinModel {
         }
     }
 
+    /**
+     * Adds or updates the Cape mesh.
+     * @param {THREE.Texture} texture
+     */
+    setCape(texture) {
+        if (this.parts.cape) {
+            if (this.parts.cape.userData.glowLayers) {
+                const layersToRemove = this.parts.cape.userData.glowLayers;
+                this.glowMeshes = this.glowMeshes.filter(layers => layers !== layersToRemove);
+            }
+
+            this.playerGroup.remove(this.parts.cape);
+            disposeObjectTree(this.parts.cape);
+            delete this.parts.cape;
+        }
+
+        if (!texture) return;
+
+        const size = { w: 10, h: 16, d: 1 };
+        const pivotPos = new THREE.Vector3(0, 0, -3);
+        const meshOffset = new THREE.Vector3(0, -8, 0.6);
+
+        const pivotGroup = new THREE.Group();
+        pivotGroup.position.copy(pivotPos);
+        pivotGroup.name = 'cape';
+        pivotGroup.rotation.x = 0.2;
+
+        this.defaultPositions['cape'] = pivotPos.clone();
+
+        const geo = new THREE.BoxGeometry(size.w, size.h, size.d);
+        applySkinUVs(geo, 0, 0, 10, 16, 1, 64, 32);
+
+        const mat = new THREE.MeshStandardMaterial({
+            map: texture,
+            side: THREE.DoubleSide,
+            transparent: true,
+            alphaTest: 0.5
+        });
+
+        const mainMesh = new THREE.Mesh(geo, mat);
+        mainMesh.position.copy(meshOffset);
+        mainMesh.rotation.y = Math.PI;
+        mainMesh.userData.originalMat = mat;
+
+        pivotGroup.add(mainMesh);
+        this.bodyMeshes.push(mainMesh);
+
+        const capeLayers = [];
+        const shellGeo = geo.clone();
+
+        for (let i = 0; i < this.LAYERS_COUNT; i++) {
+            const glowMat = createGlowMaterial(size.h);
+
+            glowMat.uniforms.thickness.value = 0;
+            glowMat.uniforms.opacity.value = 0;
+            glowMat.polygonOffset = true;
+            glowMat.polygonOffsetFactor = i * 0.1;
+
+            const layerMesh = new THREE.Mesh(shellGeo, glowMat);
+
+            layerMesh.position.copy(meshOffset);
+            layerMesh.rotation.y = Math.PI;
+
+            layerMesh.userData.layerIndex = i;
+            layerMesh.userData.isGlow = true;
+            layerMesh.userData.glowMat = glowMat;
+
+            pivotGroup.add(layerMesh);
+            capeLayers.push(layerMesh);
+        }
+
+        this.glowMeshes.push(capeLayers);
+        pivotGroup.userData.glowLayers = capeLayers;
+
+        this.playerGroup.add(pivotGroup);
+        this.parts['cape'] = pivotGroup;
+    }
+
     getGroup() { return this.playerGroup; }
 
     /**

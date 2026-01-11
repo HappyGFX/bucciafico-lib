@@ -178,6 +178,86 @@ export class SkinViewer {
         });
     }
 
+    /**
+     * Loads a cape from URL.
+     * @param {string} imageUrl
+     */
+    loadCape(imageUrl) {
+        return new Promise((resolve, reject) => {
+            const loader = new THREE.TextureLoader();
+            loader.setCrossOrigin('anonymous');
+
+            loader.load(
+                imageUrl,
+                (texture) => {
+                    texture.magFilter = THREE.NearestFilter;
+                    texture.colorSpace = THREE.SRGBColorSpace;
+
+                    texture.needsUpdate = true;
+
+                    this.skinModel.setCape(texture);
+                    this.requestRender();
+                    this.emit('cape:loaded', imageUrl);
+                    resolve();
+                },
+                undefined,
+                (err) => {
+                    console.error("Error loading cape texture:", err);
+                    reject(err);
+                }
+            );
+        });
+    }
+
+
+    /**
+     * Loads a cape by username using capes.dev API.
+     * Supports Official, Optifine, LabyMod, etc.
+     * @param {string} username
+     */
+    async loadCapeByUsername(username) {
+        this.emit('cape:loading', username);
+
+        try {
+            const response = await fetch(`https://api.capes.dev/load/${username}`);
+
+            if (!response.ok) {
+                throw new Error(`User not found in capes.dev (Status: ${response.status})`);
+            }
+
+            const data = await response.json();
+            let capeUrl = null;
+
+            if (data.minecraft?.exists && data.minecraft?.imageUrl) {
+                capeUrl = data.minecraft.imageUrl;
+            } else if (data.optifine?.exists && data.optifine?.imageUrl) {
+                capeUrl = data.optifine.imageUrl;
+            } else if (data.labymod?.exists && data.labymod?.imageUrl) {
+                capeUrl = data.labymod.imageUrl;
+            } else if (data.tlauncher?.exists && data.tlauncher?.imageUrl) {
+                capeUrl = data.tlauncher.imageUrl;
+            }
+
+            if (capeUrl) {
+                await this.loadCape(capeUrl);
+                return true;
+            } else {
+                this.resetCape();
+                return false;
+            }
+
+        } catch (e) {
+            this.emit('cape:error', e);
+            return false;
+        }
+    }
+
+    resetCape() {
+        this.skinModel.setCape(null);
+        this.requestRender();
+        this.emit('cape:removed');
+    }
+
     setPose(poseData) {
         // Record history if Editor is present
         const editor = this.getPlugin('EditorPlugin');
@@ -271,5 +351,7 @@ export class SkinViewer {
             this.renderer.domElement = null;
             this.renderer = null;
         }
+
+        this.events.dispose();
     }
 }

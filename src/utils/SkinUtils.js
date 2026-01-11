@@ -1,33 +1,33 @@
 /**
  * Calculates UV coordinates for standard Minecraft skin layout.
  */
-export function getUV(x, y, w, h) {
-    const imgW = 64;
-    const imgH = 64;
-    return { u0: x/imgW, u1: (x+w)/imgW, v0: (imgH-y-h)/imgH, v1: (imgH-y)/imgH };
+export function getUV(x, y, w, h, imgW = 64, imgH = 64) {
+    return {
+        u0: x / imgW,
+        u1: (x + w) / imgW,
+        v0: (imgH - y - h) / imgH,
+        v1: (imgH - y) / imgH
+    };
 }
 
 /**
  * Maps UV coordinates to a box geometry (Cube mapping).
+ * @param {THREE.BufferGeometry} geometry
+ * @param {number} x - Texture X
+ * @param {number} y - Texture Y
+ * @param {number} w - Width
+ * @param {number} h - Height
+ * @param {number} d - Depth
+ * @param {number} [imgW=64] - Texture Width
+ * @param {number} [imgH=64] - Texture Height
  */
-export function applySkinUVs(geometry, x, y, w, h, d) {
+export function applySkinUVs(geometry, x, y, w, h, d, imgW = 64, imgH = 64) {
     const uvAttr = geometry.attributes.uv;
 
-    /**
-     * Helper to map a single face.
-     * @param {number} idx - Face index (0-5).
-     * @param {number} uX - Texture X.
-     * @param {number} uY - Texture Y.
-     * @param {number} uW - Texture Width.
-     * @param {number} uH - Texture Height.
-     * @param {boolean} flipX - Mirror horizontally.
-     * @param {boolean} flipY - Mirror vertically.
-     */
     const map = (idx, uX, uY, uW, uH, flipX = false, flipY = false) => {
-        const uv = getUV(uX, uY, uW, uH);
+        const uv = getUV(uX, uY, uW, uH, imgW, imgH);
         const i = idx * 4;
 
-        // Handle flipping
         const u0 = flipX ? uv.u1 : uv.u0;
         const u1 = flipX ? uv.u0 : uv.u1;
         const v0 = flipY ? uv.v1 : uv.v0;
