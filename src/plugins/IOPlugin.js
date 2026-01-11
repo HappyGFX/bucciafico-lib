@@ -24,7 +24,7 @@ export class IOPlugin {
         const state = {
             meta: {
                 generator: "Bucciafico Studio",
-                version: "1.0.8",
+                version: "1.0.9",
                 timestamp: Date.now()
             },
             core: {}
@@ -116,7 +116,6 @@ export class IOPlugin {
         }
 
         const loadPromises = [];
-
         // 4. Skin/Cape (Async)
         if (data.core?.skin) {
             const skinInfo = data.core.skin;
@@ -126,6 +125,8 @@ export class IOPlugin {
                 loadPromises.push(this.viewer.loadSkin(skinInfo.value));
             }
         }
+        await Promise.all(loadPromises);
+        if (this.viewer.isDisposed) return;
 
         if (data.core?.cape) {
             const capeInfo = data.core.cape;
@@ -137,19 +138,19 @@ export class IOPlugin {
         } else {
             // Jeśli w JSON nie ma peleryny, a w viewerze jest, to ją czyścimy
             this.viewer.resetCape();
-        }
 
+        }
         // 5. Effects
         if (data.effects?.backlight) {
             const fx = this.viewer.getPlugin('EffectsPlugin');
             if (fx) fx.updateConfig(data.effects.backlight);
-        }
 
+        }
         // 6. Items (Async & Complex)
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
-            [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
 
+            [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
             if (data.items && Array.isArray(data.items)) {
                 const promises = data.items.map(async (itemData) => {
                     if (!itemData.sourceUrl) return;
@@ -173,13 +174,12 @@ export class IOPlugin {
                 });
                 await Promise.all(promises);
             }
-        }
 
+        }
         // 7. Pose
         if (data.pose) {
             this.viewer.setPose(data.pose);
-        }
 
-        await Promise.all(loadPromises);
+        }
     }
 }

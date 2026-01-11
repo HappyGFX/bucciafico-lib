@@ -149,6 +149,11 @@ export class SkinViewer {
             loader.setCrossOrigin('anonymous');
 
             loader.load(imageUrl, (texture) => {
+                if (this.isDisposed) {
+                    texture.dispose();
+                    return;
+                }
+
                 texture.magFilter = THREE.NearestFilter;
                 texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -201,6 +206,11 @@ export class SkinViewer {
             loader.load(
                 imageUrl,
                 (texture) => {
+                    if (this.isDisposed) {
+                        texture.dispose();
+                        return;
+                    }
+
                     texture.magFilter = THREE.NearestFilter;
                     texture.colorSpace = THREE.SRGBColorSpace;
 

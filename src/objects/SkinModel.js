@@ -97,6 +97,8 @@ export class SkinModel {
      * @param {boolean} isSlim - True for Alex model (3px arms), False for Steve (4px arms).
      */
     build(texture, isSlim = false) {
+        if (!this.playerGroup) return;
+
         let capeBackup = null;
         if (this.parts.cape) {
             const mesh = this.parts.cape.children.find(c => c.isMesh);
@@ -154,6 +156,7 @@ export class SkinModel {
      * @param {THREE.Texture} texture
      */
     setCape(texture) {
+        if (!this.playerGroup) return;
         if (this.parts.cape) {
             if (this.parts.cape.userData.glowLayers) {
                 const layersToRemove = this.parts.cape.userData.glowLayers;
@@ -295,6 +298,8 @@ export class SkinModel {
     }
 
     getPose() {
+        if (!this.playerGroup) return {};
+
         const pose = {};
         const f = (n) => parseFloat(n.toFixed(3));
 
