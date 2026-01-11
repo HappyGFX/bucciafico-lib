@@ -72,6 +72,7 @@ export class IOPlugin {
                     name: item.name,
                     uuid: item.uuid,
                     sourceUrl: item.userData.sourceUrl || null,
+                    parentId: item.userData.parentId || null,
                     transform: {
                         pos: item.position.toArray(),
                         rot: item.rotation.toArray(),
@@ -144,6 +145,11 @@ export class IOPlugin {
 
                     try {
                         const mesh = await itemsPlugin.addItem(itemData.sourceUrl, itemData.name);
+
+                        if (itemData.parentId) {
+                            itemsPlugin.attachItem(mesh, itemData.parentId);
+                        }
+
                         // Apply Transform
                         if (itemData.transform) {
                             mesh.position.fromArray(itemData.transform.pos);

@@ -19,6 +19,26 @@ export class ItemsPlugin {
         this.viewer = viewer;
     }
 
+    attachItem(itemMesh, partName) {
+        const editor = this.viewer.getPlugin('EditorPlugin');
+        if (editor) editor.saveHistory();
+
+        const skinModel = this.viewer.skinModel;
+
+        if (!partName) {
+            this.viewer.scene.attach(itemMesh);
+            itemMesh.userData.parentId = null;
+        }
+
+        else if (skinModel.parts[partName]) {
+            const targetGroup = skinModel.parts[partName];
+            targetGroup.attach(itemMesh);
+            itemMesh.userData.parentId = partName;
+        }
+
+        if (this.viewer.emit) this.viewer.emit('transform:change', itemMesh);
+    }
+
     _addGlowShells(mesh) {
         mesh.geometry.computeBoundingBox();
         const size = new THREE.Vector3();
@@ -138,6 +158,7 @@ export class ItemsPlugin {
         return this.items.map(item => ({
             name: item.name,
             uuid: item.uuid,
+            parentId: item.userData.parentId || null,
             pos: item.position.toArray(),
             rot: item.rotation.toArray(),
             scale: item.scale.toArray()
@@ -146,9 +167,12 @@ export class ItemsPlugin {
 
     restoreSnapshot(itemsState) {
         itemsState.forEach(state => {
-            // Try to find the item by UUID first, then Name
             const item = this.items.find(i => i.uuid === state.uuid || i.name === state.name);
             if (item) {
+                if (state.parentId !== item.userData.parentId) {
+                    this.attachItem(item, state.parentId);
+                }
+
                 item.position.fromArray(state.pos);
                 item.rotation.fromArray(state.rot);
                 item.scale.fromArray(state.scale);
