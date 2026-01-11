@@ -27,14 +27,17 @@ export class EffectsPlugin {
      */
     updateConfig(config) {
         this.isEnabled = config.enabled;
-        const skin = this.viewer.skinModel;
 
-        // Update Shader Materials
+        const skin = this.viewer.skinModel;
         skin.setGlowEffect(config.enabled);
         if (config.thickness !== undefined) skin.updateBorderThickness(config.thickness);
         if (config.height !== undefined) skin.updateGlowHeight(config.height);
 
-        // Update Composer Pass
+        const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
+        if (itemsPlugin) {
+            itemsPlugin.updateAllGlow(config);
+        }
+
         this.composer.setBloom(config.enabled, config.strength, config.radius, 0.85);
     }
 
