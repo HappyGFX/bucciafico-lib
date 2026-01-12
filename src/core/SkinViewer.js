@@ -319,6 +319,31 @@ export class SkinViewer {
     }
 
     /**
+     * Updates scene configuration at runtime.
+     * @param {Object} config
+     * @param {boolean} [config.showGrid]
+     * @param {boolean} [config.transparent]
+     * @param {string|number} [config.bgColor] - Hex color
+     */
+    updateConfig(config) {
+        this.config = { ...this.config, ...config };
+
+        if (config.showGrid !== undefined) {
+            this.sceneSetup.setGridVisible(config.showGrid);
+        }
+
+        if (this.config.transparent) {
+            this.scene.background = null;
+            this.renderer.setClearAlpha(0);
+        } else {
+            this.renderer.setClearAlpha(1);
+            this.scene.background = new THREE.Color(this.config.bgColor);
+        }
+
+        this.requestRender();
+    }
+
+    /**
      * Handles window resize. Should be called by the implementation layer.
      */
     onResize() {
