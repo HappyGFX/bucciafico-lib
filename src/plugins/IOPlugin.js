@@ -30,6 +30,10 @@ export class IOPlugin {
             core: {}
         };
 
+        const isZero = (arr) => arr[0] === 0 && arr[1] === 0 && arr[2] === 0;
+        const isOne = (arr) => arr[0] === 1 && arr[1] === 1 && arr[2] === 1;
+        const f = (n) => parseFloat(n.toFixed(3));
+
         if (options.skin) {
             state.core.skin = this.viewer.skinData || null;
             state.core.cape = this.viewer.capeData || null;
@@ -69,17 +73,24 @@ export class IOPlugin {
         if (options.items) {
             const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
             if (itemsPlugin && itemsPlugin.items.length > 0) {
-                state.items = itemsPlugin.items.map(item => ({
-                    name: item.name,
-                    uuid: item.uuid,
-                    sourceUrl: item.userData.sourceUrl || null,
-                    parentId: item.userData.parentId || null,
-                    transform: {
-                        pos: item.position.toArray(),
-                        rot: item.rotation.toArray(),
-                        scale: item.scale.toArray()
-                    }
-                }));
+                state.items = itemsPlugin.items.map(item => {
+                    const pos = item.position.toArray().map(f);
+                    const rot = item.rotation.toArray().map(f);
+                    const scale = item.scale.toArray().map(f);
+
+                    const transform = {};
+                    if (!isZero(pos)) transform.pos = pos;
+                    if (!isZero(rot)) transform.rot = rot;
+                    if (!isOne(scale)) transform.scale = scale;
+
+                    return {
+                        name: item.name,
+                        uuid: item.uuid,
+                        sourceUrl: item.userData.sourceUrl || null,
+                        parentId: item.userData.parentId || null,
+                        transform: Object.keys(transform).length > 0 ? transform : undefined
+                    };
+                });
             }
         }
 
@@ -153,13 +164,14 @@ export class IOPlugin {
             if (fx) fx.updateConfig(data.effects.backlight);
 
         }
+
         // 6. Items (Async & Complex)
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
-
             [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
+
             if (data.items && Array.isArray(data.items)) {
-                const promises = data.items.map(async (itemData) => {
+                const itemPromises = data.items.map(async (itemData) => {
                     if (!itemData.sourceUrl) return;
 
                     try {
@@ -169,20 +181,23 @@ export class IOPlugin {
                             itemsPlugin.attachItem(mesh, itemData.parentId);
                         }
 
-                        // Apply Transform
                         if (itemData.transform) {
-                            mesh.position.fromArray(itemData.transform.pos);
-                            mesh.rotation.fromArray(itemData.transform.rot);
-                            mesh.scale.fromArray(itemData.transform.scale);
+                            mesh.position.fromArray(itemData.transform.pos || [0, 0, 0]);
+                            mesh.rotation.fromArray(itemData.transform.rot || [0, 0, 0]);
+                            mesh.scale.fromArray(itemData.transform.scale || [1, 1, 1]);
+                        } else {
+                            mesh.position.set(0, 0, 0);
+                            mesh.rotation.set(0, 0, 0);
+                            mesh.scale.set(1, 1, 1);
                         }
                     } catch (e) {
                         console.warn(`Failed to import item ${itemData.name}:`, e);
                     }
                 });
-                await Promise.all(promises);
+                await Promise.all(itemPromises);
             }
-
         }
+
         // 7. Pose
         if (data.pose) {
             this.viewer.setPose(data.pose);

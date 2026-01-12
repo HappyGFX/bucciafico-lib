@@ -302,10 +302,18 @@ export class SkinModel {
     darkenBody() { this.bodyMeshes.forEach(m => m.material = this.blackMaterial); }
     restoreBody() { this.bodyMeshes.forEach(m => m.material = m.userData.originalMat); }
 
+    /**
+     * Applies a pose to the model.
+     * Resets to default T-pose first, then applies changes.
+     * @param {Object} pose
+     */
     setPose(pose) {
         for (const [name, part] of Object.entries(this.parts)) {
-            part.rotation.set(0,0,0);
-            if (this.defaultPositions[name]) part.position.copy(this.defaultPositions[name]);
+            part.rotation.set(0, 0, 0);
+            part.scale.set(1, 1, 1); // Reset scale
+            if (this.defaultPositions[name]) {
+                part.position.copy(this.defaultPositions[name]);
+            }
         }
 
         this.playerGroup.position.set(0, 0, 0);
@@ -324,30 +332,55 @@ export class SkinModel {
             if (name === 'root') continue;
 
             if (this.parts[name]) {
-                if(data.rot) this.parts[name].rotation.set(...data.rot);
-                if(data.pos) this.parts[name].position.set(...data.pos);
+                if (data.rot) this.parts[name].rotation.set(...data.rot);
+                if (data.pos) this.parts[name].position.set(...data.pos);
+                if (data.scl) this.parts[name].scale.set(...data.scl); // Added Scale support
             }
         }
     }
 
+    /**
+     * Generates a JSON representation of the current pose.
+     * Optimized: Does not export default values (0,0,0 position/rotation or 1,1,1 scale).
+     */
     getPose() {
         if (!this.playerGroup) return {};
 
         const pose = {};
         const f = (n) => parseFloat(n.toFixed(3));
 
+        const isZero = (arr) => arr[0] === 0 && arr[1] === 0 && arr[2] === 0;
+        const isOne = (arr) => arr[0] === 1 && arr[1] === 1 && arr[2] === 1;
+
         for (const [name, part] of Object.entries(this.parts)) {
-            pose[name] = {
-                rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)],
-                pos: [f(part.position.x), f(part.position.y), f(part.position.z)]
-            };
+            const rot = [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)];
+            const pos = [f(part.position.x), f(part.position.y), f(part.position.z)];
+            const scl = [f(part.scale.x), f(part.scale.y), f(part.scale.z)];
+
+            const partData = {};
+
+            if (!isZero(rot)) partData.rot = rot;
+            partData.pos = pos;
+
+            if (!isOne(scl)) partData.scl = scl;
+
+            if (Object.keys(partData).length > 0) {
+                pose[name] = partData;
+            }
         }
 
-        pose.root = {
-            pos: [f(this.playerGroup.position.x), f(this.playerGroup.position.y), f(this.playerGroup.position.z)],
-            rot: [f(this.playerGroup.rotation.x), f(this.playerGroup.rotation.y), f(this.playerGroup.rotation.z)],
-            scl: [f(this.playerGroup.scale.x), f(this.playerGroup.scale.y), f(this.playerGroup.scale.z)]
-        };
+        const rPos = [f(this.playerGroup.position.x), f(this.playerGroup.position.y), f(this.playerGroup.position.z)];
+        const rRot = [f(this.playerGroup.rotation.x), f(this.playerGroup.rotation.y), f(this.playerGroup.rotation.z)];
+        const rScl = [f(this.playerGroup.scale.x), f(this.playerGroup.scale.y), f(this.playerGroup.scale.z)];
+
+        const rootData = {};
+        if (!isZero(rPos)) rootData.pos = rPos;
+        if (!isZero(rRot)) rootData.rot = rRot;
+        if (!isOne(rScl)) rootData.scl = rScl;
+
+        if (Object.keys(rootData).length > 0) {
+            pose.root = rootData;
+        }
 
         return pose;
     }
