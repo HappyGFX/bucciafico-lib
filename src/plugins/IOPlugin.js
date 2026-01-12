@@ -24,11 +24,15 @@ export class IOPlugin {
         const state = {
             meta: {
                 generator: "Bucciafico Studio",
-                version: "1.0.8",
+                version: "1.0.9",
                 timestamp: Date.now()
             },
             core: {}
         };
+
+        const isZero = (arr) => arr[0] === 0 && arr[1] === 0 && arr[2] === 0;
+        const isOne = (arr) => arr[0] === 1 && arr[1] === 1 && arr[2] === 1;
+        const f = (n) => parseFloat(n.toFixed(3));
 
         if (options.skin) {
             state.core.skin = this.viewer.skinData || null;
@@ -69,17 +73,24 @@ export class IOPlugin {
         if (options.items) {
             const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
             if (itemsPlugin && itemsPlugin.items.length > 0) {
-                state.items = itemsPlugin.items.map(item => ({
-                    name: item.name,
-                    uuid: item.uuid,
-                    sourceUrl: item.userData.sourceUrl || null,
-                    parentId: item.userData.parentId || null,
-                    transform: {
-                        pos: item.position.toArray(),
-                        rot: item.rotation.toArray(),
-                        scale: item.scale.toArray()
-                    }
-                }));
+                state.items = itemsPlugin.items.map(item => {
+                    const pos = item.position.toArray().map(f);
+                    const rot = item.rotation.toArray().map(f);
+                    const scale = item.scale.toArray().map(f);
+
+                    const transform = {};
+                    if (!isZero(pos)) transform.pos = pos;
+                    if (!isZero(rot)) transform.rot = rot;
+                    if (!isOne(scale)) transform.scale = scale;
+
+                    return {
+                        name: item.name,
+                        uuid: item.uuid,
+                        sourceUrl: item.userData.sourceUrl || null,
+                        parentId: item.userData.parentId || null,
+                        transform: Object.keys(transform).length > 0 ? transform : undefined
+                    };
+                });
             }
         }
 
@@ -115,8 +126,14 @@ export class IOPlugin {
             this.viewer.setEnvironment(data.environment);
         }
 
-        const loadPromises = [];
+        this.viewer.loadPlaceholderSkin();
+        this.viewer.resetCape();
 
+        if (data.pose) {
+            this.viewer.setPose(data.pose);
+        }
+
+        const loadPromises = [];
         // 4. Skin/Cape (Async)
         if (data.core?.skin) {
             const skinInfo = data.core.skin;
@@ -135,14 +152,17 @@ export class IOPlugin {
                 loadPromises.push(this.viewer.loadCape(capeInfo.value));
             }
         } else {
-            // Jeśli w JSON nie ma peleryny, a w viewerze jest, to ją czyścimy
             this.viewer.resetCape();
         }
+
+        await Promise.allSettled(loadPromises);
+        if (this.viewer.isDisposed) return;
 
         // 5. Effects
         if (data.effects?.backlight) {
             const fx = this.viewer.getPlugin('EffectsPlugin');
             if (fx) fx.updateConfig(data.effects.backlight);
+
         }
 
         // 6. Items (Async & Complex)
@@ -151,7 +171,7 @@ export class IOPlugin {
             [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
 
             if (data.items && Array.isArray(data.items)) {
-                const promises = data.items.map(async (itemData) => {
+                const itemPromises = data.items.map(async (itemData) => {
                     if (!itemData.sourceUrl) return;
 
                     try {
@@ -161,17 +181,20 @@ export class IOPlugin {
                             itemsPlugin.attachItem(mesh, itemData.parentId);
                         }
 
-                        // Apply Transform
                         if (itemData.transform) {
-                            mesh.position.fromArray(itemData.transform.pos);
-                            mesh.rotation.fromArray(itemData.transform.rot);
-                            mesh.scale.fromArray(itemData.transform.scale);
+                            mesh.position.fromArray(itemData.transform.pos || [0, 0, 0]);
+                            mesh.rotation.fromArray(itemData.transform.rot || [0, 0, 0]);
+                            mesh.scale.fromArray(itemData.transform.scale || [1, 1, 1]);
+                        } else {
+                            mesh.position.set(0, 0, 0);
+                            mesh.rotation.set(0, 0, 0);
+                            mesh.scale.set(1, 1, 1);
                         }
                     } catch (e) {
                         console.warn(`Failed to import item ${itemData.name}:`, e);
                     }
                 });
-                await Promise.all(promises);
+                await Promise.all(itemPromises);
             }
         }
 
@@ -179,7 +202,5 @@ export class IOPlugin {
         if (data.pose) {
             this.viewer.setPose(data.pose);
         }
-
-        await Promise.all(loadPromises);
     }
 }

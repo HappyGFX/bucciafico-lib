@@ -25,7 +25,7 @@ export class SkinModel {
      * Creates a single body part (e.g., Head, Arm).
      * Adds Inner layer (Box), Outer layer (Voxels), and Glow mesh.
      */
-    createBodyPart(texture, coords, size, pivotPos, meshOffset, name) {
+    createBodyPart(texture, coords, size, pivotPos, meshOffset, name, renderVoxels = true) {
         const pivotGroup = new THREE.Group();
         pivotGroup.position.copy(pivotPos);
         pivotGroup.name = name;
@@ -48,18 +48,21 @@ export class SkinModel {
         this.bodyMeshes.push(innerMesh);
 
         // 2. Outer Layer (Voxelized 2nd Layer)
-        const voxelGeo = createVoxelLayer(texture, { uv: coords, size: size });
-        if (voxelGeo) {
-            const outerMat = new THREE.MeshStandardMaterial({
-                map: texture,
-                transparent: false,
-                alphaTest: 0.5,
-                side: THREE.FrontSide
-            });
-            const voxelMesh = new THREE.Mesh(voxelGeo, outerMat);
-            voxelMesh.userData.originalMat = outerMat;
-            meshGroup.add(voxelMesh);
-            this.bodyMeshes.push(voxelMesh);
+        let voxelGeo = null;
+        if (renderVoxels) {
+            voxelGeo = createVoxelLayer(texture, { uv: coords, size: size });
+            if (voxelGeo) {
+                const outerMat = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    transparent: false,
+                    alphaTest: 0.5,
+                    side: THREE.FrontSide
+                });
+                const voxelMesh = new THREE.Mesh(voxelGeo, outerMat);
+                voxelMesh.userData.originalMat = outerMat;
+                meshGroup.add(voxelMesh);
+                this.bodyMeshes.push(voxelMesh);
+            }
         }
 
         // 3. Glow Meshes (Multi-Layer Shells)
@@ -94,9 +97,12 @@ export class SkinModel {
     /**
      * Builds the entire character model from a texture.
      * @param {THREE.Texture} texture
-     * @param {boolean} isSlim - True for Alex model (3px arms), False for Steve (4px arms).
+     * @param {boolean} [isSlim=false] - True for Alex model (3px arms), False for Steve (4px arms).
+     * @param {boolean} [renderVoxels=true] - Whether to generate the outer voxel layer.
      */
-    build(texture, isSlim = false) {
+    build(texture, isSlim = false, renderVoxels = true) {
+        if (!this.playerGroup) return;
+
         let capeBackup = null;
         if (this.parts.cape) {
             const mesh = this.parts.cape.children.find(c => c.isMesh);
@@ -107,6 +113,11 @@ export class SkinModel {
                     rotation: this.parts.cape.rotation.clone(),
                     scale: this.parts.cape.scale.clone()
                 };
+                this.parts.cape.traverse(obj => {
+                    if (obj.isMesh && obj.material.map && !capeBackup.texture) {
+                        capeBackup.texture = obj.material.map;
+                    }
+                });
             }
         }
 
@@ -133,12 +144,20 @@ export class SkinModel {
         };
 
         for (const [name, def] of Object.entries(defs)) {
-            const part = this.createBodyPart(texture, def.uv, def.size, def.pivotPos, def.meshOffset, name);
+            const part = this.createBodyPart(
+                texture,
+                def.uv,
+                def.size,
+                def.pivotPos,
+                def.meshOffset,
+                name,
+                renderVoxels
+            );
             this.parts[name] = part;
             this.playerGroup.add(part);
         }
 
-        if (capeBackup) {
+        if (capeBackup && capeBackup.texture) {
             this.setCape(capeBackup.texture);
 
             if (this.parts.cape) {
@@ -154,7 +173,17 @@ export class SkinModel {
      * @param {THREE.Texture} texture
      */
     setCape(texture) {
+        if (!this.playerGroup) return;
+
+        let prevTransform = null;
+
         if (this.parts.cape) {
+            prevTransform = {
+                pos: this.parts.cape.position.clone(),
+                rot: this.parts.cape.rotation.clone(),
+                scl: this.parts.cape.scale.clone()
+            };
+
             if (this.parts.cape.userData.glowLayers) {
                 const layersToRemove = this.parts.cape.userData.glowLayers;
                 this.glowMeshes = this.glowMeshes.filter(layers => layers !== layersToRemove);
@@ -172,6 +201,7 @@ export class SkinModel {
         const meshOffset = new THREE.Vector3(0, -8, 0.6);
 
         const pivotGroup = new THREE.Group();
+
         pivotGroup.position.copy(pivotPos);
         pivotGroup.name = 'cape';
         pivotGroup.rotation.x = 0.2;
@@ -223,6 +253,12 @@ export class SkinModel {
         this.glowMeshes.push(capeLayers);
         pivotGroup.userData.glowLayers = capeLayers;
 
+        if (prevTransform) {
+            pivotGroup.position.copy(prevTransform.pos);
+            pivotGroup.rotation.copy(prevTransform.rot);
+            pivotGroup.scale.copy(prevTransform.scl);
+        }
+
         this.playerGroup.add(pivotGroup);
         this.parts['cape'] = pivotGroup;
     }
@@ -266,10 +302,18 @@ export class SkinModel {
     darkenBody() { this.bodyMeshes.forEach(m => m.material = this.blackMaterial); }
     restoreBody() { this.bodyMeshes.forEach(m => m.material = m.userData.originalMat); }
 
+    /**
+     * Applies a pose to the model.
+     * Resets to default T-pose first, then applies changes.
+     * @param {Object} pose
+     */
     setPose(pose) {
         for (const [name, part] of Object.entries(this.parts)) {
-            part.rotation.set(0,0,0);
-            if (this.defaultPositions[name]) part.position.copy(this.defaultPositions[name]);
+            part.rotation.set(0, 0, 0);
+            part.scale.set(1, 1, 1); // Reset scale
+            if (this.defaultPositions[name]) {
+                part.position.copy(this.defaultPositions[name]);
+            }
         }
 
         this.playerGroup.position.set(0, 0, 0);
@@ -288,28 +332,55 @@ export class SkinModel {
             if (name === 'root') continue;
 
             if (this.parts[name]) {
-                if(data.rot) this.parts[name].rotation.set(...data.rot);
-                if(data.pos) this.parts[name].position.set(...data.pos);
+                if (data.rot) this.parts[name].rotation.set(...data.rot);
+                if (data.pos) this.parts[name].position.set(...data.pos);
+                if (data.scl) this.parts[name].scale.set(...data.scl); // Added Scale support
             }
         }
     }
 
+    /**
+     * Generates a JSON representation of the current pose.
+     * Optimized: Does not export default values (0,0,0 position/rotation or 1,1,1 scale).
+     */
     getPose() {
+        if (!this.playerGroup) return {};
+
         const pose = {};
         const f = (n) => parseFloat(n.toFixed(3));
 
+        const isZero = (arr) => arr[0] === 0 && arr[1] === 0 && arr[2] === 0;
+        const isOne = (arr) => arr[0] === 1 && arr[1] === 1 && arr[2] === 1;
+
         for (const [name, part] of Object.entries(this.parts)) {
-            pose[name] = {
-                rot: [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)],
-                pos: [f(part.position.x), f(part.position.y), f(part.position.z)]
-            };
+            const rot = [f(part.rotation.x), f(part.rotation.y), f(part.rotation.z)];
+            const pos = [f(part.position.x), f(part.position.y), f(part.position.z)];
+            const scl = [f(part.scale.x), f(part.scale.y), f(part.scale.z)];
+
+            const partData = {};
+
+            if (!isZero(rot)) partData.rot = rot;
+            partData.pos = pos;
+
+            if (!isOne(scl)) partData.scl = scl;
+
+            if (Object.keys(partData).length > 0) {
+                pose[name] = partData;
+            }
         }
 
-        pose.root = {
-            pos: [f(this.playerGroup.position.x), f(this.playerGroup.position.y), f(this.playerGroup.position.z)],
-            rot: [f(this.playerGroup.rotation.x), f(this.playerGroup.rotation.y), f(this.playerGroup.rotation.z)],
-            scl: [f(this.playerGroup.scale.x), f(this.playerGroup.scale.y), f(this.playerGroup.scale.z)]
-        };
+        const rPos = [f(this.playerGroup.position.x), f(this.playerGroup.position.y), f(this.playerGroup.position.z)];
+        const rRot = [f(this.playerGroup.rotation.x), f(this.playerGroup.rotation.y), f(this.playerGroup.rotation.z)];
+        const rScl = [f(this.playerGroup.scale.x), f(this.playerGroup.scale.y), f(this.playerGroup.scale.z)];
+
+        const rootData = {};
+        if (!isZero(rPos)) rootData.pos = rPos;
+        if (!isZero(rRot)) rootData.rot = rRot;
+        if (!isOne(rScl)) rootData.scl = rScl;
+
+        if (Object.keys(rootData).length > 0) {
+            pose.root = rootData;
+        }
 
         return pose;
     }

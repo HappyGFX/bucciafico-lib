@@ -5,6 +5,7 @@ import { SkinModel } from '../objects/SkinModel.js';
 import { detectSlimSkin } from '../utils/SkinUtils.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {EventManager} from "../managers/EventManager.js";
+import {createPlaceholderTexture} from "../utils/TextureUtils.js";
 
 /**
  * Core 3D Viewer class.
@@ -73,6 +74,9 @@ export class SkinViewer {
             this.scene.background = new THREE.Color(this.config.bgColor);
         }
 
+        this.skinModel = new SkinModel();
+        this.scene.add(this.skinModel.getGroup());
+
         this.overlayScene = new THREE.Scene();
 
         this.sceneSetup = new SceneSetup(this.scene);
@@ -83,8 +87,7 @@ export class SkinViewer {
         });
         this.cameraManager.setEnabled(this.config.cameraEnabled);
 
-        this.skinModel = new SkinModel();
-        this.scene.add(this.skinModel.getGroup());
+        this.loadPlaceholderSkin();
 
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting) {
@@ -136,6 +139,14 @@ export class SkinViewer {
         return this.plugins.get(name);
     }
 
+    loadPlaceholderSkin() {
+        const placeholderTex = createPlaceholderTexture();
+        this.skinData = null;
+        this.resetCape();
+        this.skinModel.build(placeholderTex, false, false);
+        this.requestRender();
+    }
+
     /**
      * Loads a skin from URL.
      * @param {string} imageUrl
@@ -149,6 +160,11 @@ export class SkinViewer {
             loader.setCrossOrigin('anonymous');
 
             loader.load(imageUrl, (texture) => {
+                if (this.isDisposed) {
+                    texture.dispose();
+                    return;
+                }
+
                 texture.magFilter = THREE.NearestFilter;
                 texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -158,7 +174,7 @@ export class SkinViewer {
                 const editor = this.getPlugin('EditorPlugin');
                 if (editor) editor.deselect();
 
-                this.skinModel.build(texture, isSlim);
+                this.skinModel.build(texture, isSlim, true);
                 this.skinModel.setPose(currentPose);
                 this.skinData = { type: 'url', value: imageUrl };
 
@@ -201,6 +217,11 @@ export class SkinViewer {
             loader.load(
                 imageUrl,
                 (texture) => {
+                    if (this.isDisposed) {
+                        texture.dispose();
+                        return;
+                    }
+
                     texture.magFilter = THREE.NearestFilter;
                     texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -294,6 +315,31 @@ export class SkinViewer {
      */
     setEnvironment(config) {
         this.sceneSetup.setLightConfig(config);
+        this.requestRender();
+    }
+
+    /**
+     * Updates scene configuration at runtime.
+     * @param {Object} config
+     * @param {boolean} [config.showGrid]
+     * @param {boolean} [config.transparent]
+     * @param {string|number} [config.bgColor] - Hex color
+     */
+    updateConfig(config) {
+        this.config = { ...this.config, ...config };
+
+        if (config.showGrid !== undefined) {
+            this.sceneSetup.setGridVisible(config.showGrid);
+        }
+
+        if (this.config.transparent) {
+            this.scene.background = null;
+            this.renderer.setClearAlpha(0);
+        } else {
+            this.renderer.setClearAlpha(1);
+            this.scene.background = new THREE.Color(this.config.bgColor);
+        }
+
         this.requestRender();
     }
 
