@@ -115,6 +115,13 @@ export class IOPlugin {
             this.viewer.setEnvironment(data.environment);
         }
 
+        this.viewer.loadPlaceholderSkin();
+        this.viewer.resetCape();
+
+        if (data.pose) {
+            this.viewer.setPose(data.pose);
+        }
+
         const loadPromises = [];
         // 4. Skin/Cape (Async)
         if (data.core?.skin) {
@@ -137,7 +144,7 @@ export class IOPlugin {
             this.viewer.resetCape();
         }
 
-        await Promise.all(loadPromises);
+        await Promise.allSettled(loadPromises);
         if (this.viewer.isDisposed) return;
 
         // 5. Effects

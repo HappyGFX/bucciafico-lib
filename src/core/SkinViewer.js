@@ -5,6 +5,7 @@ import { SkinModel } from '../objects/SkinModel.js';
 import { detectSlimSkin } from '../utils/SkinUtils.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {EventManager} from "../managers/EventManager.js";
+import {createPlaceholderTexture} from "../utils/TextureUtils.js";
 
 /**
  * Core 3D Viewer class.
@@ -73,6 +74,9 @@ export class SkinViewer {
             this.scene.background = new THREE.Color(this.config.bgColor);
         }
 
+        this.skinModel = new SkinModel();
+        this.scene.add(this.skinModel.getGroup());
+
         this.overlayScene = new THREE.Scene();
 
         this.sceneSetup = new SceneSetup(this.scene);
@@ -83,8 +87,7 @@ export class SkinViewer {
         });
         this.cameraManager.setEnabled(this.config.cameraEnabled);
 
-        this.skinModel = new SkinModel();
-        this.scene.add(this.skinModel.getGroup());
+        this.loadPlaceholderSkin();
 
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting) {
@@ -136,6 +139,14 @@ export class SkinViewer {
         return this.plugins.get(name);
     }
 
+    loadPlaceholderSkin() {
+        const placeholderTex = createPlaceholderTexture();
+        this.skinData = null;
+        this.resetCape();
+        this.skinModel.build(placeholderTex, false, false);
+        this.requestRender();
+    }
+
     /**
      * Loads a skin from URL.
      * @param {string} imageUrl
@@ -163,7 +174,7 @@ export class SkinViewer {
                 const editor = this.getPlugin('EditorPlugin');
                 if (editor) editor.deselect();
 
-                this.skinModel.build(texture, isSlim);
+                this.skinModel.build(texture, isSlim, true);
                 this.skinModel.setPose(currentPose);
                 this.skinData = { type: 'url', value: imageUrl };
 

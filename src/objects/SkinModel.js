@@ -25,7 +25,7 @@ export class SkinModel {
      * Creates a single body part (e.g., Head, Arm).
      * Adds Inner layer (Box), Outer layer (Voxels), and Glow mesh.
      */
-    createBodyPart(texture, coords, size, pivotPos, meshOffset, name) {
+    createBodyPart(texture, coords, size, pivotPos, meshOffset, name, renderVoxels = true) {
         const pivotGroup = new THREE.Group();
         pivotGroup.position.copy(pivotPos);
         pivotGroup.name = name;
@@ -48,18 +48,21 @@ export class SkinModel {
         this.bodyMeshes.push(innerMesh);
 
         // 2. Outer Layer (Voxelized 2nd Layer)
-        const voxelGeo = createVoxelLayer(texture, { uv: coords, size: size });
-        if (voxelGeo) {
-            const outerMat = new THREE.MeshStandardMaterial({
-                map: texture,
-                transparent: false,
-                alphaTest: 0.5,
-                side: THREE.FrontSide
-            });
-            const voxelMesh = new THREE.Mesh(voxelGeo, outerMat);
-            voxelMesh.userData.originalMat = outerMat;
-            meshGroup.add(voxelMesh);
-            this.bodyMeshes.push(voxelMesh);
+        let voxelGeo = null;
+        if (renderVoxels) {
+            voxelGeo = createVoxelLayer(texture, { uv: coords, size: size });
+            if (voxelGeo) {
+                const outerMat = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    transparent: false,
+                    alphaTest: 0.5,
+                    side: THREE.FrontSide
+                });
+                const voxelMesh = new THREE.Mesh(voxelGeo, outerMat);
+                voxelMesh.userData.originalMat = outerMat;
+                meshGroup.add(voxelMesh);
+                this.bodyMeshes.push(voxelMesh);
+            }
         }
 
         // 3. Glow Meshes (Multi-Layer Shells)
@@ -94,9 +97,10 @@ export class SkinModel {
     /**
      * Builds the entire character model from a texture.
      * @param {THREE.Texture} texture
-     * @param {boolean} isSlim - True for Alex model (3px arms), False for Steve (4px arms).
+     * @param {boolean} [isSlim=false] - True for Alex model (3px arms), False for Steve (4px arms).
+     * @param {boolean} [renderVoxels=true] - Whether to generate the outer voxel layer.
      */
-    build(texture, isSlim = false) {
+    build(texture, isSlim = false, renderVoxels = true) {
         if (!this.playerGroup) return;
 
         let capeBackup = null;
@@ -109,6 +113,11 @@ export class SkinModel {
                     rotation: this.parts.cape.rotation.clone(),
                     scale: this.parts.cape.scale.clone()
                 };
+                this.parts.cape.traverse(obj => {
+                    if (obj.isMesh && obj.material.map && !capeBackup.texture) {
+                        capeBackup.texture = obj.material.map;
+                    }
+                });
             }
         }
 
@@ -135,7 +144,15 @@ export class SkinModel {
         };
 
         for (const [name, def] of Object.entries(defs)) {
-            const part = this.createBodyPart(texture, def.uv, def.size, def.pivotPos, def.meshOffset, name);
+            const part = this.createBodyPart(
+                texture,
+                def.uv,
+                def.size,
+                def.pivotPos,
+                def.meshOffset,
+                name,
+                renderVoxels
+            );
             this.parts[name] = part;
             this.playerGroup.add(part);
         }
