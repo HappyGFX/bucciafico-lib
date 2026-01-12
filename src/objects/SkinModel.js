@@ -140,7 +140,7 @@ export class SkinModel {
             this.playerGroup.add(part);
         }
 
-        if (capeBackup) {
+        if (capeBackup && capeBackup.texture) {
             this.setCape(capeBackup.texture);
 
             if (this.parts.cape) {
@@ -157,7 +157,16 @@ export class SkinModel {
      */
     setCape(texture) {
         if (!this.playerGroup) return;
+
+        let prevTransform = null;
+
         if (this.parts.cape) {
+            prevTransform = {
+                pos: this.parts.cape.position.clone(),
+                rot: this.parts.cape.rotation.clone(),
+                scl: this.parts.cape.scale.clone()
+            };
+
             if (this.parts.cape.userData.glowLayers) {
                 const layersToRemove = this.parts.cape.userData.glowLayers;
                 this.glowMeshes = this.glowMeshes.filter(layers => layers !== layersToRemove);
@@ -175,6 +184,7 @@ export class SkinModel {
         const meshOffset = new THREE.Vector3(0, -8, 0.6);
 
         const pivotGroup = new THREE.Group();
+
         pivotGroup.position.copy(pivotPos);
         pivotGroup.name = 'cape';
         pivotGroup.rotation.x = 0.2;
@@ -225,6 +235,12 @@ export class SkinModel {
 
         this.glowMeshes.push(capeLayers);
         pivotGroup.userData.glowLayers = capeLayers;
+
+        if (prevTransform) {
+            pivotGroup.position.copy(prevTransform.pos);
+            pivotGroup.rotation.copy(prevTransform.rot);
+            pivotGroup.scale.copy(prevTransform.scl);
+        }
 
         this.playerGroup.add(pivotGroup);
         this.parts['cape'] = pivotGroup;

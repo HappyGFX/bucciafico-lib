@@ -125,8 +125,6 @@ export class IOPlugin {
                 loadPromises.push(this.viewer.loadSkin(skinInfo.value));
             }
         }
-        await Promise.all(loadPromises);
-        if (this.viewer.isDisposed) return;
 
         if (data.core?.cape) {
             const capeInfo = data.core.cape;
@@ -136,10 +134,12 @@ export class IOPlugin {
                 loadPromises.push(this.viewer.loadCape(capeInfo.value));
             }
         } else {
-            // Jeśli w JSON nie ma peleryny, a w viewerze jest, to ją czyścimy
             this.viewer.resetCape();
-
         }
+
+        await Promise.all(loadPromises);
+        if (this.viewer.isDisposed) return;
+
         // 5. Effects
         if (data.effects?.backlight) {
             const fx = this.viewer.getPlugin('EffectsPlugin');
@@ -179,7 +179,6 @@ export class IOPlugin {
         // 7. Pose
         if (data.pose) {
             this.viewer.setPose(data.pose);
-
         }
     }
 }
