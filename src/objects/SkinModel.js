@@ -4,6 +4,7 @@ import { applySkinUVs } from '../utils/SkinUtils.js';
 import { createVoxelLayer } from '../utils/Voxelizer.js';
 import { createGlowMaterial } from '../materials/GlowMaterial.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
+import { JOINTS, JointBinding } from "./BoneRig.js";
 
 /**
  * Represents the Minecraft Character Model (Steve/Alex).
@@ -13,6 +14,7 @@ export class SkinModel {
     constructor() {
         this.playerGroup = new THREE.Group();
         this.parts = {};
+        this.jointBindings = [];
         this.glowMeshes = [];
         this.bodyMeshes = [];
         this.defaultPositions = {};
@@ -26,7 +28,7 @@ export class SkinModel {
      * Adds Inner layer (Box), Outer layer (Voxels), and Glow mesh.
      */
     createBodyPart(texture, coords, size, pivotPos, meshOffset, name, renderVoxels = true) {
-        const pivotGroup = new THREE.Group();
+        const pivotGroup = new THREE.Bone();
         pivotGroup.position.copy(pivotPos);
         pivotGroup.name = name;
         this.defaultPositions[name] = pivotPos.clone();
@@ -131,6 +133,7 @@ export class SkinModel {
         this.bodyMeshes = [];
         this.defaultPositions = {};
 
+        this.jointBindings = [];
         const armW = isSlim ? 3 : 4;
         const armOff = isSlim ? 5.0 : 6.0;
 
@@ -156,6 +159,20 @@ export class SkinModel {
             this.parts[name] = part;
             this.playerGroup.add(part);
         }
+
+        for (const [name, parent] of Object.entries(JOINTS)) {
+            const binding = new JointBinding(this.parts[parent], name);
+            this.jointBindings.push(binding);
+            this.parts[name] = binding.bone;
+            this.defaultPositions[name] = binding.bone.position.clone();
+        }
+        // The torso joint bends its upper half about the centre (y = -6).
+        // Compensate attachment positions to preserve existing head/arm pose JSON.
+        this.upperBody = new THREE.Group();
+        this.upperBody.position.set(0, 6, 0);
+        this.parts.waist.add(this.upperBody);
+        for (const name of ['head', 'rightArm', 'leftArm']) this.upperBody.add(this.parts[name]);
+        this.updateBones();
 
         if (capeBackup && capeBackup.texture) {
             this.setCape(capeBackup.texture);
@@ -189,7 +206,7 @@ export class SkinModel {
                 this.glowMeshes = this.glowMeshes.filter(layers => layers !== layersToRemove);
             }
 
-            this.playerGroup.remove(this.parts.cape);
+            this.parts.cape.removeFromParent();
             disposeObjectTree(this.parts.cape);
             delete this.parts.cape;
         }
@@ -259,11 +276,33 @@ export class SkinModel {
             pivotGroup.scale.copy(prevTransform.scl);
         }
 
-        this.playerGroup.add(pivotGroup);
+        (this.upperBody || this.playerGroup).add(pivotGroup);
         this.parts['cape'] = pivotGroup;
     }
 
     getGroup() { return this.playerGroup; }
+
+    getBones() { return Object.keys(this.parts).filter(name => this.parts[name].isBone); }
+
+    getBone(name) {
+        const bone = Object.hasOwn(this.parts, name) ? this.parts[name] : null;
+        return bone?.isBone ? bone : null;
+    }
+
+    setBoneRotation(name, rotation) {
+        const bone = this.getBone(name);
+        if (!bone) throw new Error('Unknown bone: ' + name);
+        if (!Array.isArray(rotation) || rotation.length !== 3 || !rotation.every(Number.isFinite)) {
+            throw new TypeError('Bone rotation must contain three finite angles in radians');
+        }
+        bone.rotation.set(...rotation);
+        this.updateBones();
+    }
+
+    updateBones() {
+        this.jointBindings.forEach(binding => binding.update());
+        this.playerGroup?.updateMatrixWorld(true);
+    }
 
     /**
      * Updates thickness creating a solid volume effect.
@@ -320,7 +359,7 @@ export class SkinModel {
         this.playerGroup.rotation.set(0, 0, 0);
         this.playerGroup.scale.set(1, 1, 1);
 
-        if (!pose) return;
+        if (!pose) { this.updateBones(); return; }
 
         if (pose.root) {
             if (pose.root.pos) this.playerGroup.position.fromArray(pose.root.pos);
@@ -331,12 +370,13 @@ export class SkinModel {
         for (const [name, data] of Object.entries(pose)) {
             if (name === 'root') continue;
 
-            if (this.parts[name]) {
+            if (Object.hasOwn(this.parts, name) && data) {
                 if (data.rot) this.parts[name].rotation.set(...data.rot);
                 if (data.pos) this.parts[name].position.set(...data.pos);
                 if (data.scl) this.parts[name].scale.set(...data.scl); // Added Scale support
             }
         }
+        this.updateBones();
     }
 
     /**
@@ -397,5 +437,7 @@ export class SkinModel {
         this.glowMeshes = [];
         this.bodyMeshes = [];
         this.playerGroup = null;
+        this.upperBody = null;
+        this.jointBindings = [];
     }
 }

@@ -51,6 +51,7 @@ export class EffectsPlugin {
     _applyToScene() {
         const config = this.state;
         const skin = this.viewer.skinModel;
+        skin.updateBones();
 
         skin.setGlowEffect(config.enabled);
 
@@ -81,6 +82,7 @@ export class EffectsPlugin {
      */
     render() {
         const skin = this.viewer.skinModel;
+        skin.updateBones();
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const items = itemsPlugin ? itemsPlugin.items : [];
 

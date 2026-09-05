@@ -176,3 +176,39 @@ io.importState(jsonState).then(() => {
 
 ## License
 MIT License
+
+## Bone posing
+
+The viewer exposes `getBones()` (names), `getBone(name)` (Three.js Bone),
+`setBoneRotation(name, [x, y, z])`, and `getPose()`. Angles use radians,
+local XYZ Euler rotations. Setters request a frame and participate in editor history.
+
+```js
+viewer.setBoneRotation('rightElbow', [-Math.PI / 2, 0, 0]);
+viewer.setBoneRotation('leftKnee', [Math.PI / 3, 0, 0]);
+viewer.setBoneRotation('waist', [0, Math.PI / 6, 0]);
+const pose = viewer.getPose();
+viewer.setPose(pose);
+viewer.getPlugin('EditorPlugin').selectBone('rightElbow');
+```
+
+Available bones: head, body, rightArm, leftArm, rightLeg, leftLeg,
+rightElbow, leftElbow, rightKnee, leftKnee, waist.
+Elbows and knees deform the lower half of their limb, including voxel and glow layers.
+The waist joint sits at the centre of the torso (local y = -6). Rotation is distributed
+smoothly over the full torso height, from fixed hips to the full rotation at the shoulders.
+Quaternion interpolation preserves the width of each cross-section; the head, arms and
+cape follow the shoulders. Body rotation
+still moves the whole torso. Existing part names and head/limb rest positions are retained.
+
+In Studio, select an arm, leg or the body. The large outer gizmo transforms the whole
+part; the smaller inner rotation rings control its elbow, knee or centre torso joint.
+Both sets share the same display centre, while the anatomical joint pivot stays intact.
+Outer axes use RGB; inner axes use orange (X), cyan (Y), and violet (Z).
+Both are available together, including while Move or Scale is selected. Dragging the
+inner rings selects the joint in the numeric panel (degrees), without changing tools.
+You can also select joints directly in Hierarchy.
+Pose export/import, skin reload and undo/redo include joint transforms.
+`setPose({})` resets all joints; `setPose` replaces the pose, while
+`setBoneRotation` changes only one bone. Direct Bone mutations require
+`viewer.requestRender()` when rendering is paused.

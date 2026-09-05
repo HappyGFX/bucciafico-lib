@@ -306,6 +306,23 @@ export class SkinViewer {
         if (editor) editor.saveHistory();
 
         this.skinModel.setPose(poseData);
+        this.emit('transform:change', editor?.selectedObject || editor?.transformControl.object);
+        this.requestRender();
+    }
+
+    /** Returns the names of the available pose bones. */
+    getBones() { return this.skinModel.getBones(); }
+    getBone(name) { return this.skinModel.getBone(name); }
+    getPose() { return this.skinModel.getPose(); }
+
+    setBoneRotation(name, rotation) {
+        if (!this.getBone(name)) throw new Error('Unknown bone: ' + name);
+        if (!Array.isArray(rotation) || rotation.length !== 3 || !rotation.every(Number.isFinite)) {
+            throw new TypeError('Bone rotation must contain three finite angles in radians');
+        }
+        this.getPlugin('EditorPlugin')?.saveHistory();
+        this.skinModel.setBoneRotation(name, rotation);
+        this.emit('transform:change', this.getBone(name));
         this.requestRender();
     }
 
@@ -372,6 +389,8 @@ export class SkinViewer {
             return;
         }
 
+        this.skinModel.updateBones();
+        this.getPlugin('EditorPlugin')?.syncBoneHandle();
         const effects = this.getPlugin('EffectsPlugin');
 
         if (effects) {

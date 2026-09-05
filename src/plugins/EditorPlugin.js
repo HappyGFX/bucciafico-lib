@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { HistoryManager } from '../managers/HistoryManager.js';
+import { JOINTS } from '../objects/BoneRig.js';
 
 /**
  * Plugin responsible for User Interaction.
@@ -10,6 +11,7 @@ export class EditorPlugin {
     constructor() {
         this.name = 'EditorPlugin';
         this.hoveredObject = null;
+        this.mode = 'rotate';
     }
 
     /**
@@ -25,37 +27,104 @@ export class EditorPlugin {
 
         this.setupGizmo();
         this.bindEvents();
+        this.unsubscribeSkin = viewer.on('skin:loaded', () => this.deselect());
+        this.unsubscribeTransform = viewer.on('transform:change', () => this.syncBoneHandle());
     }
 
     setupGizmo() {
-        this.transformControl = new TransformControls(this.viewer.cameraManager.camera, this.viewer.renderer.domElement);
-        this.transformControl.setMode('rotate');
-
-        // Handle History recording on drag start
-        this.transformControl.addEventListener('dragging-changed', (event) => {
-            this.viewer.cameraManager.setEnabled(!event.value);
-            if (event.value === true) {
-                this.saveHistory();
+        const createControl = (size) => {
+            const control = new TransformControls(this.viewer.cameraManager.camera, this.viewer.renderer.domElement);
+            control.setMode('rotate');
+            control.setSpace('local');
+            control.setSize(size);
+            this.viewer.overlayScene.add(control.getHelper?.() || control);
+            control.addEventListener('dragging-changed', event => {
+                if (event.value) {
+                    this.cameraWasEnabled = this.viewer.cameraManager.controls.enabled;
+                    this.viewer.cameraManager.setEnabled(false);
+                    this.saveHistory();
+                    this.selectedObject = control === this.boneControl ? this.boneTarget : control.object;
+                    this.viewer.emit('selection:change', this.selectedObject);
+                } else {
+                    this.viewer.cameraManager.setEnabled(this.cameraWasEnabled ?? true);
+                }
+            });
+            control.addEventListener('change', () => {
+                this.viewer.skinModel.updateBones();
+                this.viewer.requestRender();
+                if (control.object) this.viewer.emit('transform:change', control === this.boneControl ? this.boneTarget : control.object);
+            });
+            return control;
+        };
+        this.transformControl = createControl(1);
+        this.boneControl = createControl(0.48);
+        // A display handle shares the outer gizmo's centre. The real joint keeps
+        // its anatomical pivot; only the handle's orientation is applied to it.
+        this.boneHandle = new THREE.Object3D();
+        this.viewer.overlayScene.add(this.boneHandle);
+        const palette = { X: 0xff9d45, Y: 0x38d9e6, Z: 0xb58aff, E: 0xf1b8fa, XYZE: 0xf1b8fa };
+        this.boneControl.traverse(child => {
+            if (child.material?.color && palette[child.name]) {
+                child.material.color.setHex(palette[child.name]);
+                child.material._color = child.material.color.clone();
             }
         });
-
-        this.transformControl.addEventListener('change', () => {
-            if (this.transformControl.object) {
-                this.viewer.emit('transform:change', this.transformControl.object);
-            }
+        this.boneControl.addEventListener('objectChange', () => {
+            if (!this.boneTarget) return;
+            const parentRotation = this.boneTarget.parent.getWorldQuaternion(new THREE.Quaternion());
+            this.boneTarget.quaternion.copy(parentRotation.invert().multiply(this.boneHandle.quaternion));
+            this.viewer.skinModel.updateBones();
+            this.viewer.emit('transform:change', this.boneTarget);
+            this.viewer.requestRender();
         });
+    }
 
+    syncBoneHandle() {
+        if (!this.boneTarget || !this.transformControl.object) return;
+        this.viewer.skinModel.updateBones();
+        this.transformControl.object.getWorldPosition(this.boneHandle.position);
+        if (!this.boneControl.dragging) this.boneTarget.getWorldQuaternion(this.boneHandle.quaternion);
+        this.boneHandle.updateMatrixWorld(true);
+    }
 
-        this.viewer.overlayScene.add(this.transformControl);
+    // Decide which set of rings owns the gesture before Three.js handles it.
+    // Small bone rings take priority where their hit areas overlap the outer gizmo.
+    routePointer(event) {
+        if (this.transformControl.dragging || this.boneControl.dragging || this.mode === 'view') return;
+        this.syncBoneHandle();
+        const rect = this.viewer.renderer.domElement.getBoundingClientRect();
+        const pointer = { x: (event.clientX - rect.left) / rect.width * 2 - 1,
+            y: -(event.clientY - rect.top) / rect.height * 2 + 1, button: event.button };
+        const controls = [this.boneControl, this.transformControl];
+        for (const control of controls) {
+            control.enabled = true;
+            (control.getHelper?.() || control).updateMatrixWorld(true);
+            control.pointerHover(pointer);
+        }
+        const owner = controls.find(control => control.object && control.axis);
+        for (const control of controls) {
+            control.enabled = !owner || owner === control;
+            if (owner && owner !== control) control.axis = null;
+        }
     }
 
     bindEvents() {
-        this.onPointerDown = (e) => this.handleClick(e);
-        this.onPointerMove = (e) => this.handleHover(e);
-
         const canvas = this.viewer.renderer.domElement;
+        this.onRoutePointer = event => this.routePointer(event);
+        this.onPointerDown = event => this.handleClick(event);
+        this.onPointerMove = event => this.handleHover(event);
+        this.onPointerEnd = () => {
+            // Also covers pointercancel/lostpointercapture, where Three.js has no handler.
+            for (const control of [this.transformControl, this.boneControl]) {
+                if (control.dragging) control.pointerUp({ button: 0 });
+                control.enabled = this.mode !== 'view';
+            }
+        };
+        canvas.addEventListener('pointerdown', this.onRoutePointer, true);
+        canvas.addEventListener('pointermove', this.onRoutePointer, true);
         canvas.addEventListener('pointerdown', this.onPointerDown);
         canvas.addEventListener('pointermove', this.onPointerMove);
+        for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(event, this.onPointerEnd);
     }
 
     getIntersects(event) {
@@ -84,7 +153,7 @@ export class EditorPlugin {
     }
 
     handleHover(event) {
-        if (this.transformControl.dragging) return;
+        if (this.transformControl.dragging || this.boneControl.dragging) return;
 
         const intersects = this.getIntersects(event);
 
@@ -125,7 +194,8 @@ export class EditorPlugin {
     }
 
     handleClick(event) {
-        if (this.transformControl.dragging) return;
+        if (event.button !== 0 || this.transformControl.dragging || this.boneControl.dragging || this.transformControl.axis || this.boneControl.axis) return;
+        this.viewer.skinModel.updateBones();
 
         const rect = this.viewer.renderer.domElement.getBoundingClientRect();
         this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -143,13 +213,14 @@ export class EditorPlugin {
             objectsToCheck = [...objectsToCheck, ...itemsPlugin.items];
         }
 
-        const intersects = this.raycaster.intersectObjects(objectsToCheck, true);
+        const intersects = this.raycaster.intersectObjects(objectsToCheck, true)
+            .filter(hit => !hit.object.userData.isGlow && hit.object.visible);
 
         if (intersects.length > 0) {
             let hitObject = intersects[0].object;
             let logicalTarget = hitObject;
-
             while (logicalTarget.parent) {
+                if (Object.values(this.viewer.skinModel.parts).includes(logicalTarget)) break;
                 if (logicalTarget.parent === playerGroup) {
                     break;
                 }
@@ -174,31 +245,53 @@ export class EditorPlugin {
     }
 
     selectObject(obj) {
-        this.transformControl.attach(obj);
-
-        // Notify EffectsPlugin to draw outline
+        if (!obj) return;
+        if (this.mode === 'view') this.setTransformMode('rotate');
+        this.selectedObject = obj;
+        const model = this.viewer.skinModel;
+        const parentName = JOINTS[obj.name];
+        const main = parentName ? model.parts[parentName] : obj;
+        const jointName = parentName ? obj.name : Object.keys(JOINTS).find(name => model.parts[JOINTS[name]] === main);
+        this.transformControl.attach(main);
+        this.boneTarget = jointName ? model.getBone(jointName) : null;
+        if (this.boneTarget) {
+            this.syncBoneHandle();
+            this.boneControl.attach(this.boneHandle);
+        } else this.boneControl.detach();
         const fx = this.viewer.getPlugin('EffectsPlugin');
-        if (fx) fx.setSelected(obj);
-
-        // Callback support (can be injected)
+        if (fx) fx.setSelected(main);
         this.viewer.emit('selection:change', obj);
     }
 
     deselect() {
         this.transformControl.detach();
-
+        this.boneControl.detach();
+        this.boneTarget = null;
+        this.selectedObject = null;
         const fx = this.viewer.getPlugin('EffectsPlugin');
         if (fx) fx.setSelected(null);
-
         this.viewer.emit('selection:cleared');
     }
 
-    /**
-     * Sets gizmo mode.
-     * @param {'translate'|'rotate'|'scale'} mode
-     */
+    /** Outer transform tool; the inner joint rings always remain available. */
     setTransformMode(mode) {
-        this.transformControl.setMode(mode);
+        // Keep the old API mode as an alias, without a separate Studio tool.
+        if (mode === 'bones') mode = 'rotate';
+        if (!['view', 'translate', 'rotate', 'scale'].includes(mode)) return;
+        this.mode = mode;
+        this.transformControl.enabled = mode !== 'view';
+        this.boneControl.enabled = mode !== 'view';
+        this.transformControl.setMode(mode === 'view' ? 'rotate' : mode);
+        this.transformControl.setSpace(mode === 'translate' ? 'world' : 'local');
+        if (mode === 'view') this.deselect();
+        this.viewer.emit('tool:change', mode);
+        this.viewer.requestRender();
+    }
+
+    selectBone(name) {
+        const bone = this.viewer.skinModel.getBone(name);
+        if (!bone) throw new Error('Unknown bone: ' + name);
+        this.selectObject(bone);
     }
 
     // --- HISTORY API ---
@@ -221,24 +314,26 @@ export class EditorPlugin {
         if (itemsPlugin && state.items) {
             itemsPlugin.restoreSnapshot(state.items);
         }
+        this.viewer.emit('transform:change', this.selectedObject);
+        this.viewer.requestRender();
     }
 
     dispose() {
-        if (this.viewer.renderer.domElement) {
-            this.viewer.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
-            this.viewer.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
+        this.unsubscribeSkin?.();
+        this.unsubscribeTransform?.();
+        this.boneHandle.removeFromParent();
+        const canvas = this.viewer.renderer.domElement;
+        if (canvas) {
+            canvas.removeEventListener('pointerdown', this.onRoutePointer, true);
+            canvas.removeEventListener('pointermove', this.onRoutePointer, true);
+            canvas.removeEventListener('pointerdown', this.onPointerDown);
+            canvas.removeEventListener('pointermove', this.onPointerMove);
+            for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.removeEventListener(event, this.onPointerEnd);
         }
-
-        if (this.transformControl) {
-            this.transformControl.detach();
-            this.transformControl.object = undefined;
-
-            if (this.transformControl.parent) {
-                this.transformControl.parent.remove(this.transformControl);
-            }
-
-            this.transformControl.dispose();
-            this.transformControl = null;
+        for (const control of [this.transformControl, this.boneControl]) {
+            control.detach();
+            (control.getHelper?.() || control).removeFromParent();
+            control.dispose();
         }
     }
 }
