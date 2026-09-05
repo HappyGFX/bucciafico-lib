@@ -75,7 +75,7 @@ export class IOPlugin {
             if (itemsPlugin && itemsPlugin.items.length > 0) {
                 state.items = itemsPlugin.items.map(item => {
                     const pos = item.position.toArray().map(f);
-                    const rot = item.rotation.toArray().map(f);
+                    const rot = item.rotation.toArray().slice(0,3).map(f);
                     const scale = item.scale.toArray().map(f);
 
                     const transform = {};
@@ -88,12 +88,20 @@ export class IOPlugin {
                         uuid: item.uuid,
                         sourceUrl: item.userData.sourceUrl || null,
                         parentId: item.userData.parentId || null,
+                        characterId: item.userData.characterId || null,
                         transform: Object.keys(transform).length > 0 ? transform : undefined
                     };
                 });
             }
         }
 
+        state.activeCharacterId=this.viewer.activeCharacter.id;
+        state.characters=this.viewer.characters.map(c=>{
+            const result=this.viewer.exportCharacter(c);
+            if(!options.skin){delete result.skin;delete result.cape;}
+            if(!options.pose)delete result.pose;
+            return result;
+        });
         return state;
     }
 
@@ -104,103 +112,40 @@ export class IOPlugin {
      * @returns {Promise<void>}
      */
     async importState(jsonData) {
-        const data = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-
-        // 1. Core Config (Background, Grid)
-        if (data.core?.config) {
-            const cfg = data.core.config;
-            this.viewer.config.showGrid = cfg.showGrid;
-            this.viewer.sceneSetup.setGridVisible(cfg.showGrid);
-            if (!cfg.transparent && cfg.bgColor) {
-                this.viewer.scene.background.setHex(cfg.bgColor);
+        const data=typeof jsonData==='string'?JSON.parse(jsonData):jsonData;
+        if(!data||typeof data!=='object')throw new Error('Nieprawidłowy projekt.');
+        const records=data.characters||[{name:'Character',skin:data.core?.skin,cape:data.core?.cape,pose:data.pose}];
+        if(!Array.isArray(records)||!records.length||records.length>20)throw new Error('Projekt musi zawierać od 1 do 20 postaci.');
+        const original=[...this.viewer.characters],previous=this.viewer.activeCharacter.id;
+        const cameraBefore=this.viewer.cameraManager.getSettingsJSON();
+        const staged=[],ids=new Map();
+        try {
+            for(const record of records){
+                if(!record||!['auto','steve','alex'].includes(record.modelType||'auto'))throw new Error('Nieprawidłowa postać w projekcie.');
+                const c=await this.viewer.addCharacter({...record,id:undefined});staged.push(c);ids.set(record.id,c.id);
+                c.lockScale=record.lockScale!==false;
+                if(record.cape?.value){if(record.cape.type==='username')await this.viewer.loadCapeByUsername(record.cape.value);else await this.viewer.loadCape(record.cape.value);}
+            }
+        } catch(error){for(const c of staged)this.viewer.removeCharacter(c.id);this.viewer.selectCharacter(previous);this.viewer.cameraManager.loadSettingsJSON(cameraBefore);throw error;}
+        for(const c of original)this.viewer.removeCharacter(c.id);
+        this.viewer.selectCharacter(ids.get(data.activeCharacterId)||staged[0].id);
+        if(data.core?.config)this.viewer.updateConfig(data.core.config);
+        if(data.core?.camera)this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
+        if(data.environment)this.viewer.setEnvironment(data.environment);
+        if(data.effects?.backlight)this.viewer.getPlugin('EffectsPlugin')?.updateConfig(data.effects.backlight);
+        const items=this.viewer.getPlugin('ItemsPlugin');
+        if(items){
+            [...items.items].forEach(item=>items.removeItem(item));
+            for(const item of data.items||[]){
+                if(!item.sourceUrl)continue;
+                const mesh=await items.addItem(item.sourceUrl,item.name);
+                if(item.parentId)items.attachItem(mesh,item.parentId,ids.get(item.characterId)||staged[0].id);
+                mesh.position.fromArray(item.transform?.pos||[0,0,0]);
+                mesh.rotation.fromArray(item.transform?.rot||[0,0,0]);
+                mesh.scale.fromArray(item.transform?.scale||[1,1,1]);
             }
         }
-
-        // 2. Camera
-        if (data.core?.camera) {
-            this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
-        }
-
-        // 3. Environment
-        if (data.environment) {
-            this.viewer.setEnvironment(data.environment);
-        }
-
-        this.viewer.loadPlaceholderSkin();
-        this.viewer.resetCape();
-
-        if (data.pose) {
-            this.viewer.setPose(data.pose);
-        }
-
-        const loadPromises = [];
-        // 4. Skin/Cape (Async)
-        if (data.core?.skin) {
-            const skinInfo = data.core.skin;
-            if (skinInfo.type === 'username') {
-                loadPromises.push(this.viewer.loadSkinByUsername(skinInfo.value));
-            } else if (skinInfo.value) {
-                loadPromises.push(this.viewer.loadSkin(skinInfo.value));
-            }
-        }
-
-        if (data.core?.cape) {
-            const capeInfo = data.core.cape;
-            if (capeInfo.type === 'username') {
-                loadPromises.push(this.viewer.loadCapeByUsername(capeInfo.value));
-            } else if (capeInfo.value) {
-                loadPromises.push(this.viewer.loadCape(capeInfo.value));
-            }
-        } else {
-            this.viewer.resetCape();
-        }
-
-        await Promise.allSettled(loadPromises);
-        if (this.viewer.isDisposed) return;
-
-        // 5. Effects
-        if (data.effects?.backlight) {
-            const fx = this.viewer.getPlugin('EffectsPlugin');
-            if (fx) fx.updateConfig(data.effects.backlight);
-
-        }
-
-        // 6. Items (Async & Complex)
-        const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
-        if (itemsPlugin) {
-            [...itemsPlugin.items].forEach(item => itemsPlugin.removeItem(item));
-
-            if (data.items && Array.isArray(data.items)) {
-                const itemPromises = data.items.map(async (itemData) => {
-                    if (!itemData.sourceUrl) return;
-
-                    try {
-                        const mesh = await itemsPlugin.addItem(itemData.sourceUrl, itemData.name);
-
-                        if (itemData.parentId) {
-                            itemsPlugin.attachItem(mesh, itemData.parentId);
-                        }
-
-                        if (itemData.transform) {
-                            mesh.position.fromArray(itemData.transform.pos || [0, 0, 0]);
-                            mesh.rotation.fromArray(itemData.transform.rot || [0, 0, 0]);
-                            mesh.scale.fromArray(itemData.transform.scale || [1, 1, 1]);
-                        } else {
-                            mesh.position.set(0, 0, 0);
-                            mesh.rotation.set(0, 0, 0);
-                            mesh.scale.set(1, 1, 1);
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to import item ${itemData.name}:`, e);
-                    }
-                });
-                await Promise.all(itemPromises);
-            }
-        }
-
-        // 7. Pose
-        if (data.pose) {
-            this.viewer.setPose(data.pose);
-        }
+        this.viewer.getPlugin('EditorPlugin')?.deselect();
+        this.viewer.emit('characters:change');this.viewer.requestRender();
     }
 }

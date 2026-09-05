@@ -1,11 +1,10 @@
+import {CharacterMethods} from './CharacterMethods.js';
 import * as THREE from 'three';
 import { CameraManager } from '../managers/CameraManager.js';
 import { SceneSetup } from '../objects/SceneSetup.js';
 import { SkinModel } from '../objects/SkinModel.js';
-import { detectSlimSkin } from '../utils/SkinUtils.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {EventManager} from "../managers/EventManager.js";
-import {createPlaceholderTexture} from "../utils/TextureUtils.js";
 
 /**
  * Core 3D Viewer class.
@@ -74,7 +73,9 @@ export class SkinViewer {
             this.scene.background = new THREE.Color(this.config.bgColor);
         }
 
+        this.characters = [];
         this.skinModel = new SkinModel();
+        this.registerCharacter(this.skinModel,'Character 1');
         this.scene.add(this.skinModel.getGroup());
 
         this.overlayScene = new THREE.Scene();
@@ -139,77 +140,13 @@ export class SkinViewer {
         return this.plugins.get(name);
     }
 
-    loadPlaceholderSkin() {
-        const placeholderTex = createPlaceholderTexture();
-        this.skinData = null;
-        this.resetCape();
-        this.skinModel.build(placeholderTex, false, false);
-        this.requestRender();
-    }
-
-    /**
-     * Loads a skin from URL.
-     * @param {string} imageUrl
-     * @returns {Promise<boolean>} isSlim
-     */
-    loadSkin(imageUrl) {
-        this.emit('skin:loading', imageUrl);
-
-        return new Promise((resolve, reject) => {
-            const loader = new THREE.TextureLoader();
-            loader.setCrossOrigin('anonymous');
-
-            loader.load(imageUrl, (texture) => {
-                if (this.isDisposed) {
-                    texture.dispose();
-                    return;
-                }
-
-                texture.magFilter = THREE.NearestFilter;
-                texture.colorSpace = THREE.SRGBColorSpace;
-
-                const currentPose = this.skinModel.getPose();
-                const isSlim = detectSlimSkin(texture.image);
-
-                const editor = this.getPlugin('EditorPlugin');
-                if (editor) editor.deselect();
-
-                this.skinModel.build(texture, isSlim, true);
-                this.skinModel.setPose(currentPose);
-                this.skinData = { type: 'url', value: imageUrl };
-
-                const fxPlugin = this.getPlugin('EffectsPlugin');
-                if (fxPlugin) {
-                    fxPlugin.forceUpdate();
-                }
-
-                this.requestRender();
-
-                this.emit('skin:loaded', { isSlim, texture });
-
-                resolve(isSlim);
-            }, undefined, (err) => {
-                this.emit('skin:error', err);
-                reject(err);
-            });
-        });
-    }
-
-    loadSkinByUsername(username) {
-        this.skinData = { type: 'username', value: username };
-        const url = `https://minotar.net/skin/${username}.png?v=${Date.now()}`;
-
-        return this.loadSkin(url).then(res => {
-            this.skinData = { type: 'username', value: username };
-            return res;
-        });
-    }
-
     /**
      * Loads a cape from URL.
      * @param {string} imageUrl
      */
-    loadCape(imageUrl) {
+    loadCape(imageUrl, {characterId=this.activeCharacter.id}={}) {
+        const character=this.getCharacter(characterId);
+        if(!character)return Promise.reject(new Error('Nie znaleziono postaci.'));
         return new Promise((resolve, reject) => {
             const loader = new THREE.TextureLoader();
             loader.setCrossOrigin('anonymous');
@@ -217,8 +154,9 @@ export class SkinViewer {
             loader.load(
                 imageUrl,
                 (texture) => {
-                    if (this.isDisposed) {
+                    if (this.isDisposed || !this.getCharacter(character.id)) {
                         texture.dispose();
+                        resolve(false);
                         return;
                     }
 
@@ -227,14 +165,14 @@ export class SkinViewer {
 
                     texture.needsUpdate = true;
 
-                    this.skinModel.setCape(texture);
+                    character.model.setCape(texture);
 
                     const fxPlugin = this.getPlugin('EffectsPlugin');
                     if (fxPlugin) {
                         fxPlugin.forceUpdate();
                     }
 
-                    this.capeData = { type: 'url', value: imageUrl };
+                    character.capeData = { type: 'url', value: imageUrl };
 
                     this.requestRender();
                     this.emit('cape:loaded', imageUrl);
@@ -256,6 +194,7 @@ export class SkinViewer {
      * @param {string} username
      */
     async loadCapeByUsername(username) {
+        const character=this.activeCharacter;
         this.emit('cape:loading', username);
 
         try {
@@ -279,11 +218,10 @@ export class SkinViewer {
             }
 
             if (capeUrl) {
-                await this.loadCape(capeUrl);
-                this.capeData = { type: 'username', value: username };
+                await this.loadCape(capeUrl,{characterId:character.id});
+                character.capeData = { type: 'username', value: username };
                 return true;
             } else {
-                this.resetCape();
                 return false;
             }
 
@@ -389,7 +327,7 @@ export class SkinViewer {
             return;
         }
 
-        this.skinModel.updateBones();
+        this.characters.forEach(c=>c.model.updateBones());
         this.getPlugin('EditorPlugin')?.syncBoneHandle();
         const effects = this.getPlugin('EffectsPlugin');
 
@@ -417,7 +355,7 @@ export class SkinViewer {
         this.plugins.clear();
 
         if (this.skinModel) {
-            this.skinModel.dispose();
+            this.characters.forEach(c=>{c.abort?.abort();c.model.dispose();});
         }
 
         disposeObjectTree(this.scene);
@@ -441,3 +379,8 @@ export class SkinViewer {
         this.events.dispose();
     }
 }
+Object.assign(SkinViewer.prototype,CharacterMethods);
+Object.defineProperties(SkinViewer.prototype,{
+    skinData:{get(){return this.activeCharacter?.skinData??null;},set(value){if(this.activeCharacter)this.activeCharacter.skinData=value;}},
+    capeData:{get(){return this.activeCharacter?.capeData??null;},set(value){if(this.activeCharacter)this.activeCharacter.capeData=value;}}
+});

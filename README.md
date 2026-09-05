@@ -212,3 +212,51 @@ Pose export/import, skin reload and undo/redo include joint transforms.
 `setPose({})` resets all joints; `setPose` replaces the pose, while
 `setBoneRotation` changes only one bone. Direct Bone mutations require
 `viewer.requestRender()` when rendering is paused.
+
+
+## Skin import and characters
+
+`viewer.loadSkin(fileOrUrl)` accepts a PNG Blob/File, data URL or URL. Import checks the
+PNG signature, decoded image and exact dimensions (64×64 or legacy 64×32), with a 2 MB
+limit and a 15-second fetch timeout. Legacy limbs are mirrored face by face into a 64×64
+atlas. Failed or superseded loads do not replace the current skin. Base and outer layers
+preserve alpha; outer layers extrude individual visible pixels with correctly oriented face UVs.
+Internal walls between adjacent opaque pixels are removed. Alex arms are 3 px wide with shoulder centres at ±5.5.
+
+```js
+await viewer.loadSkin(file);
+viewer.setModelType('alex'); // auto | steve | alex; manual choice survives skin replacement
+viewer.setCharacterVisibility({outer: true, parts: {head: false}, outerParts: {leftArm: false}});
+await viewer.loadSkinByUsername('HappyGFX'); // also accepts plain or dashed UUID
+const next = await viewer.addCharacter({name: 'Second character'});
+await viewer.duplicateCharacter(next.id);
+viewer.selectCharacter(next.id);
+viewer.renameCharacter(next.id, 'Alex');
+viewer.activeCharacter.lockScale = true;
+viewer.getPlugin('ItemsPlugin').attachItem(item, 'rightElbow', next.id);
+const project = viewer.getPlugin('IOPlugin').exportState();
+await viewer.getPlugin('IOPlugin').importState(project);
+```
+
+`skinModel`, pose methods and skin/cape fields address the active character. Each entry
+in `viewer.characters` has its own model, texture, pose, visibility, model type and scale
+lock. Selecting a mesh switches its owner to active. Cosmetics keep their local transform
+and attachment through skin/model changes. Project JSON includes all characters and item
+owner IDs; legacy single-character JSON is still accepted.
+
+Studio supports file input and dropping one skin anywhere, per-part base/outer visibility,
+character names, duplication, adding/removing characters, and uniform scale via gizmo or
+numeric inputs. Its local browser library stores the 12 most recent skins with head
+thumbnails and up to 20 named presets (skin, model type, layer visibility). Presets keep
+the current pose. These libraries are stored on this browser/device, not on an account.
+
+Network skins use [Minotar's documented username/UUID endpoint](https://minotar.net/).
+Auto model inference uses both unused arm strips; ambiguous textures can be overridden
+manually. Modern partial transparency is retained rather than forced opaque.
+
+Validation: run `npm --prefix apps/api test` from the monorepo root. The self-contained
+browser integration test is `node apps/api/test/browser-skins.mjs`; set
+`PUPPETEER_EXECUTABLE_PATH` to an installed Chrome if necessary. The Studio UI test is
+`node apps/api/test/browser-skins-ui.mjs` with Studio running on port 3031 (or set
+`STUDIO_URL`). Browser tests use generated fixture skins and can save screenshots in
+`QA_OUTPUT_DIR`.

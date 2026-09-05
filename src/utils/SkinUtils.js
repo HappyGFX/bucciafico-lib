@@ -49,18 +49,13 @@ export function applySkinUVs(geometry, x, y, w, h, d, imgW = 64, imgH = 64) {
     uvAttr.needsUpdate = true;
 }
 
-/**
- * Detects if a skin is Slim (Alex model) by checking the pixel at (55, 20).
- * If transparent, it's Slim. If opaque, it's Classic.
- * @param {HTMLImageElement} image
- * @returns {boolean} True if Slim.
- */
+/** Infer Alex only when both unused arm strips are transparent. Manual override is available. */
 export function detectSlimSkin(image) {
-    const canvas = document.createElement('canvas');
-    canvas.width = image.width;
-    canvas.height = image.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(image, 0, 0);
-    // Check specific pixel transparency
-    return ctx.getImageData(55, 20, 1, 1).data[3] === 0;
+    if(image.height===32)return false;
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0);
+    return [[54,20],[46,52]].every(([x,y])=>{
+        const data=ctx.getImageData(x,y,2,12).data;
+        return data.every((v,i)=>i%4!==3||v===0);
+    });
 }

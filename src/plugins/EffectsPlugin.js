@@ -53,10 +53,7 @@ export class EffectsPlugin {
         const skin = this.viewer.skinModel;
         skin.updateBones();
 
-        skin.setGlowEffect(config.enabled);
-
-        skin.updateBorderThickness(config.thickness);
-        skin.updateGlowHeight(config.height);
+        for(const {model} of this.viewer.characters){model.setGlowEffect(config.enabled);model.updateBorderThickness(config.thickness);model.updateGlowHeight(config.height);}
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -82,18 +79,18 @@ export class EffectsPlugin {
      */
     render() {
         const skin = this.viewer.skinModel;
-        skin.updateBones();
+        this.viewer.characters.forEach(c=>c.model.updateBones());
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const items = itemsPlugin ? itemsPlugin.items : [];
 
         this.composer.renderSelective(
             () => {
-                skin.darkenBody();
+                this.viewer.characters.forEach(c=>c.model.darkenBody());
                 this.viewer.sceneSetup.setGridVisible(false);
                 items.forEach(i => i.material = skin.blackMaterial);
             },
             () => {
-                skin.restoreBody();
+                this.viewer.characters.forEach(c=>c.model.restoreBody());
                 this.viewer.sceneSetup.setGridVisible(this.viewer.config.showGrid);
                 items.forEach(i => {
                     if(i.userData.originalMat) i.material = i.userData.originalMat;

@@ -43,6 +43,7 @@ export class EditorPlugin {
                     this.cameraWasEnabled = this.viewer.cameraManager.controls.enabled;
                     this.viewer.cameraManager.setEnabled(false);
                     this.saveHistory();
+                    this.scaleStart=control.object.scale.clone();
                     this.selectedObject = control === this.boneControl ? this.boneTarget : control.object;
                     this.viewer.emit('selection:change', this.selectedObject);
                 } else {
@@ -57,6 +58,16 @@ export class EditorPlugin {
             return control;
         };
         this.transformControl = createControl(1);
+        this.transformControl.addEventListener('objectChange',()=>{
+            const control=this.transformControl;
+            const character=this.viewer.characterForObject(control.object);
+            if(control.mode==='scale' && character?.lockScale && this.scaleStart){
+                const axis=(control.axis?.[0]||'X').toLowerCase();
+                const factor=control.object.scale[axis]/(this.scaleStart[axis]||1);
+                if(Number.isFinite(factor)&&factor>0)control.object.scale.copy(this.scaleStart).multiplyScalar(factor);
+                this.viewer.emit('transform:change',control.object);
+            }
+        });
         this.boneControl = createControl(0.48);
         // A display handle shares the outer gizmo's centre. The real joint keeps
         // its anatomical pivot; only the handle's orientation is applied to it.
@@ -136,13 +147,13 @@ export class EditorPlugin {
 
         let objectsToCheck = [];
 
-        this.viewer.skinModel.getGroup().traverse((child) => {
-            if (child.isMesh && child.material.visible) {
+        this.viewer.characters.forEach(c=>c.model.getGroup().traverse((child) => {
+            if (child.isMesh && child.visible && !child.userData.isGlow && child.material.visible) {
                 if (child.material.side !== THREE.BackSide) {
                     objectsToCheck.push(child);
                 }
             }
-        });
+        }));
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -206,7 +217,7 @@ export class EditorPlugin {
         let objectsToCheck = [];
 
         const playerGroup = this.viewer.skinModel.getGroup();
-        if (playerGroup) objectsToCheck.push(playerGroup);
+        objectsToCheck.push(...this.viewer.characters.map(c=>c.model.getGroup()));
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -214,12 +225,15 @@ export class EditorPlugin {
         }
 
         const intersects = this.raycaster.intersectObjects(objectsToCheck, true)
-            .filter(hit => !hit.object.userData.isGlow && hit.object.visible);
+            .filter(hit => !hit.object.userData.isGlow && !hit.object.userData.isGlowLayer && hit.object.visible);
 
         if (intersects.length > 0) {
             let hitObject = intersects[0].object;
+            const owner=this.viewer.characterForObject(hitObject);
+            if(owner)this.viewer.selectCharacter(owner.id);
             let logicalTarget = hitObject;
             while (logicalTarget.parent) {
+                if (itemsPlugin?.items.includes(logicalTarget)) break;
                 if (Object.values(this.viewer.skinModel.parts).includes(logicalTarget)) break;
                 if (logicalTarget.parent === playerGroup) {
                     break;
@@ -247,6 +261,8 @@ export class EditorPlugin {
     selectObject(obj) {
         if (!obj) return;
         if (this.mode === 'view') this.setTransformMode('rotate');
+        const owner=this.viewer.characterForObject(obj);
+        if(owner)this.viewer.selectCharacter(owner.id);
         this.selectedObject = obj;
         const model = this.viewer.skinModel;
         const parentName = JOINTS[obj.name];
@@ -300,7 +316,7 @@ export class EditorPlugin {
         const pose = this.viewer.skinModel.getPose();
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const itemsState = itemsPlugin ? itemsPlugin.getSnapshot() : [];
-        return { pose, items: itemsState };
+        return { pose, characters:this.viewer.characters.map(c=>({id:c.id,pose:c.model.getPose(),visibility:structuredClone(c.model.visibility)})), items: itemsState };
     }
 
     saveHistory() { this.history.pushState(this.getSnapshot()); }
@@ -308,7 +324,8 @@ export class EditorPlugin {
     redo() { this.history.redo(this.getSnapshot()); }
 
     restoreState(state) {
-        if (state.pose) this.viewer.skinModel.setPose(state.pose);
+        if(state.characters)state.characters.forEach(data=>{const c=this.viewer.getCharacter(data.id);if(c){c.model.setPose(data.pose);c.model.setVisibility(data.visibility);}});
+        else if (state.pose) this.viewer.skinModel.setPose(state.pose);
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin && state.items) {

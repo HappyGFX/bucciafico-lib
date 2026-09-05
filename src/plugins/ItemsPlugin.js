@@ -19,23 +19,27 @@ export class ItemsPlugin {
         this.viewer = viewer;
     }
 
-    attachItem(itemMesh, partName) {
+    attachItem(itemMesh, partName, characterId=this.viewer.activeCharacter.id) {
         const editor = this.viewer.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();
 
-        const skinModel = this.viewer.skinModel;
+        const skinModel = this.viewer.getCharacter(characterId)?.model;
+        if(partName&&!skinModel?.parts[partName])throw new Error('Nie znaleziono części ciała.');
 
         if (!partName) {
             this.viewer.scene.attach(itemMesh);
             itemMesh.userData.parentId = null;
+            itemMesh.userData.characterId = null;
         }
 
         else if (skinModel.parts[partName]) {
             const targetGroup = skinModel.parts[partName];
             targetGroup.attach(itemMesh);
             itemMesh.userData.parentId = partName;
+            itemMesh.userData.characterId = characterId;
         }
 
+        skinModel?.applyVisibility();
         if (this.viewer.emit) this.viewer.emit('transform:change', itemMesh);
     }
 
@@ -109,7 +113,7 @@ export class ItemsPlugin {
         const editor = this.viewer.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();
 
-        this.viewer.scene.remove(mesh);
+        mesh.removeFromParent();
         this.items = this.items.filter(i => i !== mesh);
 
         disposeObjectTree(mesh);
@@ -159,6 +163,7 @@ export class ItemsPlugin {
             name: item.name,
             uuid: item.uuid,
             parentId: item.userData.parentId || null,
+            characterId: item.userData.characterId || null,
             pos: item.position.toArray(),
             rot: item.rotation.toArray(),
             scale: item.scale.toArray()
@@ -169,8 +174,8 @@ export class ItemsPlugin {
         itemsState.forEach(state => {
             const item = this.items.find(i => i.uuid === state.uuid || i.name === state.name);
             if (item) {
-                if (state.parentId !== item.userData.parentId) {
-                    this.attachItem(item, state.parentId);
+                if (state.parentId !== item.userData.parentId || state.characterId !== item.userData.characterId) {
+                    this.attachItem(item, state.parentId, state.characterId);
                 }
 
                 item.position.fromArray(state.pos);
