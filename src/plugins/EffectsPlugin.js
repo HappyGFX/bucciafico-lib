@@ -82,19 +82,22 @@ export class EffectsPlugin {
         this.viewer.characters.forEach(c=>c.model.updateBones());
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const items = itemsPlugin ? itemsPlugin.items : [];
+        const equipmentMaterials = new Map();
 
         this.composer.renderSelective(
             () => {
                 this.viewer.characters.forEach(c=>c.model.darkenBody());
                 this.viewer.sceneSetup.setGridVisible(false);
-                items.forEach(i => i.material = skin.blackMaterial);
+                items.forEach(item => item.traverse(mesh => {
+                    if(!mesh.isMesh || mesh.userData.isGlowLayer) return;
+                    equipmentMaterials.set(mesh,mesh.material);
+                    mesh.material=skin.blackMaterial;
+                }));
             },
             () => {
                 this.viewer.characters.forEach(c=>c.model.restoreBody());
                 this.viewer.sceneSetup.setGridVisible(this.viewer.config.showGrid);
-                items.forEach(i => {
-                    if(i.userData.originalMat) i.material = i.userData.originalMat;
-                });
+                equipmentMaterials.forEach((material,mesh)=>{mesh.material=material;});
             }
         );
     }

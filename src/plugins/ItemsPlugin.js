@@ -1,3 +1,4 @@
+import {EquipmentMethods} from './EquipmentMethods.js';
 import * as THREE from 'three';
 import { ItemFactory } from '../objects/ItemFactory.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
@@ -17,6 +18,7 @@ export class ItemsPlugin {
 
     init(viewer) {
         this.viewer = viewer;
+        this.unsubs=['transform:change','characters:change','skin:loaded','pose:change'].map(event=>viewer.on(event,()=>this.updateEquipment()));
     }
 
     attachItem(itemMesh, partName, characterId=this.viewer.activeCharacter.id) {
@@ -24,7 +26,7 @@ export class ItemsPlugin {
         if (editor) editor.saveHistory();
 
         const skinModel = this.viewer.getCharacter(characterId)?.model;
-        if(partName&&!skinModel?.parts[partName])throw new Error('Nie znaleziono części ciała.');
+        if(partName&&!skinModel?.getAttachment(partName))throw new Error('Nie znaleziono części ciała.');
 
         if (!partName) {
             this.viewer.scene.attach(itemMesh);
@@ -32,14 +34,17 @@ export class ItemsPlugin {
             itemMesh.userData.characterId = null;
         }
 
-        else if (skinModel.parts[partName]) {
-            const targetGroup = skinModel.parts[partName];
+        else if (skinModel.getAttachment(partName)) {
+            const targetGroup = skinModel.getAttachment(partName);
             targetGroup.attach(itemMesh);
             itemMesh.userData.parentId = partName;
             itemMesh.userData.characterId = characterId;
         }
 
+        delete itemMesh.userData.twoHanded;
         skinModel?.applyVisibility();
+        this.updateEquipment();
+        this.viewer.requestRender();
         if (this.viewer.emit) this.viewer.emit('transform:change', itemMesh);
     }
 
@@ -89,6 +94,7 @@ export class ItemsPlugin {
         return ItemFactory.createFromURL(url, name).then(mesh => {
             mesh.position.set(8, 8, 8);
             mesh.userData.sourceUrl = url;
+            mesh.userData.pixelScale=mesh.scale.x;
 
             this._addGlowShells(mesh);
 
@@ -166,13 +172,14 @@ export class ItemsPlugin {
             characterId: item.userData.characterId || null,
             pos: item.position.toArray(),
             rot: item.rotation.toArray(),
+            equipment:this.equipmentData(item),
             scale: item.scale.toArray()
         }));
     }
 
     restoreSnapshot(itemsState) {
         itemsState.forEach(state => {
-            const item = this.items.find(i => i.uuid === state.uuid || i.name === state.name);
+            let item = this.items.find(i => state.uuid?i.uuid===state.uuid:i.name===state.name);
             if (item) {
                 if (state.parentId !== item.userData.parentId || state.characterId !== item.userData.characterId) {
                     this.attachItem(item, state.parentId, state.characterId);
@@ -181,11 +188,13 @@ export class ItemsPlugin {
                 item.position.fromArray(state.pos);
                 item.rotation.fromArray(state.rot);
                 item.scale.fromArray(state.scale);
+                this.restoreEquipmentData(item,state.equipment);
             }
         });
     }
 
     dispose() {
+        this.unsubs?.forEach(fn=>fn());
         this.items.forEach(mesh => {
             this.viewer.scene.remove(mesh);
             disposeObjectTree(mesh);
@@ -193,3 +202,4 @@ export class ItemsPlugin {
         this.items = [];
     }
 }
+Object.assign(ItemsPlugin.prototype,EquipmentMethods);

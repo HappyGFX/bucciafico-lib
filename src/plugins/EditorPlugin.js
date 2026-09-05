@@ -44,6 +44,8 @@ export class EditorPlugin {
                     this.viewer.cameraManager.setEnabled(false);
                     this.saveHistory();
                     this.scaleStart=control.object.scale.clone();
+                    this.dragStart={position:control.object.position.clone(),rotation:control.object.rotation.clone(),scale:control.object.scale.clone()};
+                    this.boneRotationStart=this.boneTarget?.rotation.clone();
                     this.selectedObject = control === this.boneControl ? this.boneTarget : control.object;
                     this.viewer.emit('selection:change', this.selectedObject);
                 } else {
@@ -67,6 +69,12 @@ export class EditorPlugin {
                 if(Number.isFinite(factor)&&factor>0)control.object.scale.copy(this.scaleStart).multiplyScalar(factor);
                 this.viewer.emit('transform:change',control.object);
             }
+            const locks=this.viewer.getPlugin('PosePlugin')?.settings.locks;
+            if(this.dragStart&&locks)for(const axis of ['x','y','z'])if(locks[axis]){
+                const field={translate:'position',rotate:'rotation',scale:'scale'}[control.mode];
+                if(field)control.object[field][axis]=this.dragStart[field][axis];
+            }
+            this.viewer.emit('transform:change',control.object);
         });
         this.boneControl = createControl(0.48);
         // A display handle shares the outer gizmo's centre. The real joint keeps
@@ -84,6 +92,8 @@ export class EditorPlugin {
             if (!this.boneTarget) return;
             const parentRotation = this.boneTarget.parent.getWorldQuaternion(new THREE.Quaternion());
             this.boneTarget.quaternion.copy(parentRotation.invert().multiply(this.boneHandle.quaternion));
+            const locks=this.viewer.getPlugin('PosePlugin')?.settings.locks;
+            if(this.boneRotationStart&&locks)for(const axis of ['x','y','z'])if(locks[axis])this.boneTarget.rotation[axis]=this.boneRotationStart[axis];
             this.viewer.skinModel.updateBones();
             this.viewer.emit('transform:change', this.boneTarget);
             this.viewer.requestRender();
@@ -101,6 +111,7 @@ export class EditorPlugin {
     // Decide which set of rings owns the gesture before Three.js handles it.
     // Small bone rings take priority where their hit areas overlap the outer gizmo.
     routePointer(event) {
+        if (this.viewer.getPlugin('PosePlugin')?.ikControl) return;
         if (this.transformControl.dragging || this.boneControl.dragging || this.mode === 'view') return;
         this.syncBoneHandle();
         const rect = this.viewer.renderer.domElement.getBoundingClientRect();
@@ -205,6 +216,7 @@ export class EditorPlugin {
     }
 
     handleClick(event) {
+        if (this.viewer.getPlugin('PosePlugin')?.ikControl) return;
         if (event.button !== 0 || this.transformControl.dragging || this.boneControl.dragging || this.transformControl.axis || this.boneControl.axis) return;
         this.viewer.skinModel.updateBones();
 
@@ -316,15 +328,17 @@ export class EditorPlugin {
         const pose = this.viewer.skinModel.getPose();
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const itemsState = itemsPlugin ? itemsPlugin.getSnapshot() : [];
-        return { pose, characters:this.viewer.characters.map(c=>({id:c.id,pose:c.model.getPose(),visibility:structuredClone(c.model.visibility)})), items: itemsState };
+        return { pose, characters:this.viewer.characters.map(c=>({id:c.id,footPins:structuredClone(c.footPins||{}),pose:c.model.getPose(),visibility:structuredClone(c.model.visibility)})), items: itemsState };
     }
 
-    saveHistory() { this.history.pushState(this.getSnapshot()); }
+    saveHistory() { if(this.restoring)return;this.history.pushState(this.getSnapshot()); }
     undo() { this.history.undo(this.getSnapshot()); }
     redo() { this.history.redo(this.getSnapshot()); }
 
     restoreState(state) {
-        if(state.characters)state.characters.forEach(data=>{const c=this.viewer.getCharacter(data.id);if(c){c.model.setPose(data.pose);c.model.setVisibility(data.visibility);}});
+        this.restoring=true;
+        try {
+        if(state.characters)state.characters.forEach(data=>{const c=this.viewer.getCharacter(data.id);if(c){c.footPins=structuredClone(data.footPins||{});c.model.setPose(data.pose);c.model.setVisibility(data.visibility);}});
         else if (state.pose) this.viewer.skinModel.setPose(state.pose);
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
@@ -332,7 +346,9 @@ export class EditorPlugin {
             itemsPlugin.restoreSnapshot(state.items);
         }
         this.viewer.emit('transform:change', this.selectedObject);
+        this.viewer.emit('pose:change');
         this.viewer.requestRender();
+        }finally{this.restoring=false;}
     }
 
     dispose() {

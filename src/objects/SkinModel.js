@@ -102,7 +102,7 @@ export class SkinModel {
 
         const defs = {
             head: { uv: { inner: {x:0, y:0}, outer: {x:32, y:0} }, size: { w:8, h:8, d:8 }, pivotPos: new THREE.Vector3(0, 0, 0), meshOffset: new THREE.Vector3(0, 4, 0) },
-            body: { uv: { inner: {x:16, y:16}, outer: {x:16, y:32} }, size: { w:8, h:12, d:4 }, pivotPos: new THREE.Vector3(0, 0, 0), meshOffset: new THREE.Vector3(0, -6, 0) },
+            body: { uv: { inner: {x:16, y:16}, outer: {x:16, y:32} }, size: { w:8, h:12, d:4 }, pivotPos: new THREE.Vector3(0, -6, 0), meshOffset: new THREE.Vector3(0, 0, 0) },
             rightArm: { uv: { inner: {x:40, y:16}, outer: {x:40, y:32} }, size: { w:armW, h:12, d:4 }, pivotPos: new THREE.Vector3(-armOff, -2, 0), meshOffset: new THREE.Vector3(0, -4, 0) },
             leftArm: { uv: { inner: {x:32, y:48}, outer: {x:48, y:48} }, size: { w:armW, h:12, d:4 }, pivotPos: new THREE.Vector3(armOff, -2, 0), meshOffset: new THREE.Vector3(0, -4, 0) },
             rightLeg: { uv: { inner: {x:0, y:16}, outer: {x:0, y:32} }, size: { w:4, h:12, d:4 }, pivotPos: new THREE.Vector3(-2, -12, 0), meshOffset: new THREE.Vector3(0, -6, 0) },
@@ -137,6 +137,11 @@ export class SkinModel {
         for (const name of ['head', 'rightArm', 'leftArm']) this.upperBody.add(this.parts[name]);
         this.updateBones();
 
+        this.sockets={};
+        for(const [name,parent,y] of [['rightHand','rightElbow',-5.5],['leftHand','leftElbow',-5.5],['rightFoot','rightKnee',-6],['leftFoot','leftKnee',-6]]){
+            const socket=new THREE.Object3D();socket.name=name;socket.position.y=y;this.parts[parent].add(socket);this.sockets[name]=socket;
+        }
+        this.updateBones();
         this.applyVisibility();
         if(oldTexture && oldTexture!==texture)oldTexture.dispose();
         if (capeBackup && capeBackup.texture) {
@@ -260,6 +265,8 @@ export class SkinModel {
             if(skinPart)mesh.visible=this.visibility.parts[skinPart]!==false && this.visibility[skinLayer]!==false && (skinLayer!=='outer'||this.visibility.outerParts[skinPart]!==false);
         });
     }
+
+    getAttachment(name) { return name==='root'?this.playerGroup:(this.sockets?.[name] || this.parts[name]); }
 
     getBones() { return Object.keys(this.parts).filter(name => this.parts[name].isBone); }
 
