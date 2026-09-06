@@ -80,7 +80,7 @@ export class SkinViewer {
 
         this.overlayScene = new THREE.Scene();
 
-        this.sceneSetup = new SceneSetup(this.scene);
+        this.sceneSetup = new SceneSetup(this.scene, this.renderer);
         this.sceneSetup.setGridVisible(this.config.showGrid);
 
         this.cameraManager = new CameraManager(this.renderer.domElement, w, h, () => {
@@ -334,6 +334,7 @@ export class SkinViewer {
         if (effects) {
             effects.render();
         } else {
+            this.sceneSetup.updateShadows();
             this.renderer.clear();
             this.renderer.render(this.scene, this.cameraManager.camera);
         }
@@ -358,6 +359,7 @@ export class SkinViewer {
             this.characters.forEach(c=>{c.abort?.abort();c.model.dispose();});
         }
 
+        this.sceneSetup.dispose();
         disposeObjectTree(this.scene);
         disposeObjectTree(this.overlayScene);
 

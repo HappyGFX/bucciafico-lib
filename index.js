@@ -7,3 +7,5 @@ export {PosePlugin} from './src/plugins/PosePlugin.js';
 export {POSE_PRESETS} from './src/utils/PoseUtils.js';
 
 export {ResourcePackManager} from './src/resources/ResourcePackManager.js';
+
+export { MINECRAFT_LIGHTING } from './src/objects/SceneSetup.js';

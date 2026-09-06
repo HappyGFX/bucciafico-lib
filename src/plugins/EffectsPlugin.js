@@ -88,6 +88,7 @@ export class EffectsPlugin {
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const items = itemsPlugin ? itemsPlugin.items : [];
         itemsPlugin?.updateWorldGlow();
+        this.viewer.sceneSetup.updateShadows();
         const equipmentMaterials = new Map();
 
         this.composer.renderSelective(

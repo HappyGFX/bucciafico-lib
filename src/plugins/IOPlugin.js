@@ -200,7 +200,7 @@ export class IOPlugin {
             this.viewer.selectCharacter(ids.get(data.activeCharacterId) || staged[0].id);
             if (data.core?.config) this.viewer.updateConfig(data.core.config);
             if (data.core?.camera) this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
-            if (data.environment) this.viewer.setEnvironment(data.environment);
+            if (data.environment) this.viewer.setEnvironment({shadows:false, shadowStrength:0.65, shadowSoftness:1, sunAzimuth:45, sunElevation:55, ...data.environment});
             if (data.effects?.backlight) this.viewer.getPlugin('EffectsPlugin')?.updateConfig(data.effects.backlight);
             if (posing) {
                 if (Array.isArray(data.poseLibrary)) posing.library = data.poseLibrary.slice(0, 100);
