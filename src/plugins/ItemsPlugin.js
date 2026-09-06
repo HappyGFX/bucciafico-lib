@@ -1,3 +1,4 @@
+import {ImportedModelStore} from '../resources/ModelAdapters.js';
 import {ResourceItemMethods} from './ResourceItemMethods.js';
 import {EquipmentMethods} from './EquipmentMethods.js';
 import * as THREE from 'three';
@@ -13,6 +14,8 @@ export class ItemsPlugin {
         this.name = 'ItemsPlugin';
         /** @type {Array<THREE.Mesh>} List of current items on scene */
         this.items = [];
+        this.models = new ImportedModelStore();
+        this.resourceScopes = new Map();
 
         this.LAYERS_COUNT = 20;
     }
@@ -22,7 +25,7 @@ export class ItemsPlugin {
         this.unsubs = ['transform:change', 'characters:change', 'skin:loaded', 'pose:change'].map(event => viewer.on(event, () => this.updateEquipment()));
     }
 
-    attachItem(itemMesh, partName, characterId = this.viewer.activeCharacter.id) {
+    attachItem(itemMesh, partName, characterId = this.viewer.activeCharacter?.id) {
         const editor = this.viewer.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();
 
@@ -90,10 +93,11 @@ export class ItemsPlugin {
      * @param {string} name - Item name.
      */
     addItem(url, name) {
+        if(!this.viewer.getPlugin('EditorPlugin')?.restoring)this.viewer.getPlugin('SceneToolsPlugin')?.checkCapacity(1);
         const editor = this.viewer.getPlugin('EditorPlugin');
-        if (editor) editor.saveHistory();
-
         return ItemFactory.createFromURL(url, name).then(mesh => {
+            try{if(!editor?.restoring)this.viewer.getPlugin('SceneToolsPlugin')?.checkCapacity(1);}catch(e){disposeObjectTree(mesh);throw e;}
+            editor?.saveHistory();
             mesh.position.set(8, 8, 8);
             mesh.userData.sourceUrl = url;
             mesh.userData.pixelScale = mesh.scale.x;
@@ -109,12 +113,24 @@ export class ItemsPlugin {
             this.viewer.scene.add(mesh);
             this.items.push(mesh);
 
-            if (editor) editor.selectObject(mesh);
+            if (editor && !editor.restoring) editor.selectObject(mesh);
 
             if (this.viewer.emit) this.viewer.emit('items:added', mesh);
 
             return mesh;
         });
+    }
+
+    async addImportedModel(id, name='Imported model') {
+        if(!this.viewer.getPlugin('EditorPlugin')?.restoring)this.viewer.getPlugin('SceneToolsPlugin')?.checkCapacity(1);
+        const content=await this.models.create(id), root=new THREE.Group();
+        try{if(!this.viewer.getPlugin('EditorPlugin')?.restoring)this.viewer.getPlugin('SceneToolsPlugin')?.checkCapacity(1);}catch(e){disposeObjectTree(content);throw e;}
+        root.name=name;root.userData.importedModel=id;root.add(content);
+        this.viewer.getPlugin('EditorPlugin')?.saveHistory();
+        this.viewer.scene.add(root);this.items.push(root);
+        const fx=this.viewer.getPlugin('EffectsPlugin');if(fx)this.updateItemGlow(root,fx.getConfig());
+        if(!this.viewer.getPlugin('EditorPlugin')?.restoring)this.viewer.getPlugin('EditorPlugin')?.selectObject(root);
+        this.viewer.emit('items:added',root);this.viewer.requestRender();return root;
     }
 
     removeItem(mesh) {
@@ -152,7 +168,7 @@ export class ItemsPlugin {
     }
 
     updateItemGlow(item, config) {
-        if (item.userData.resourceSpec) {
+        if (item.userData.resourceSpec || item.userData.importedModel) {
             if (item.userData.resourceError) return;
             const meshes = [];
             item.traverse(mesh => {
@@ -243,11 +259,13 @@ export class ItemsPlugin {
         this.resourceUnsub?.();
         this.unsubs?.forEach(fn => fn());
         this.items.forEach(mesh => {
-            this.viewer.scene.remove(mesh);
+            mesh.removeFromParent();
             disposeObjectTree(mesh);
         });
         this.items = [];
         this.resourceRenderer?.dispose();
+        for(const scope of this.resourceScopes.values())scope.renderer.dispose();
+        this.models.dispose();
     }
 }
 

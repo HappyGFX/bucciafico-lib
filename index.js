@@ -9,3 +9,6 @@ export {POSE_PRESETS} from './src/utils/PoseUtils.js';
 export {ResourcePackManager} from './src/resources/ResourcePackManager.js';
 
 export { MINECRAFT_LIGHTING } from './src/objects/SceneSetup.js';
+export {SceneToolsPlugin} from './src/plugins/SceneToolsPlugin.js';
+export {ModelAdapterRegistry,ImportedModelStore} from './src/resources/ModelAdapters.js';
+export {unpackProjectAssets} from './src/utils/ProjectAssets.js';

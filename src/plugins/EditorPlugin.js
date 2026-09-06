@@ -12,6 +12,7 @@ export class EditorPlugin {
         this.name = 'EditorPlugin';
         this.hoveredObject = null;
         this.mode = 'rotate';
+        this.selectedObjects = [];
     }
 
     /**
@@ -46,7 +47,7 @@ export class EditorPlugin {
                     this.scaleStart=control.object.scale.clone();
                     this.dragStart={position:control.object.position.clone(),rotation:control.object.rotation.clone(),scale:control.object.scale.clone()};
                     this.boneRotationStart=this.boneTarget?.rotation.clone();
-                    this.selectedObject = control === this.boneControl ? this.boneTarget : control.object;
+                    if(control.object!==this.viewer.getPlugin('SceneToolsPlugin')?.pivot)this.selectedObject = control === this.boneControl ? this.boneTarget : control.object;
                     this.viewer.emit('selection:change', this.selectedObject);
                 } else {
                     this.viewer.cameraManager.setEnabled(this.cameraWasEnabled ?? true);
@@ -69,7 +70,8 @@ export class EditorPlugin {
                 if(Number.isFinite(factor)&&factor>0)control.object.scale.copy(this.scaleStart).multiplyScalar(factor);
                 this.viewer.emit('transform:change',control.object);
             }
-            const locks=this.viewer.getPlugin('PosePlugin')?.settings.locks;
+            const tools=this.viewer.getPlugin('SceneToolsPlugin');
+            const locks=tools?.selection.length?tools.settings.locks:this.viewer.getPlugin('PosePlugin')?.settings.locks;
             if(this.dragStart&&locks)for(const axis of ['x','y','z'])if(locks[axis]){
                 const field={translate:'position',rotate:'rotation',scale:'scale'}[control.mode];
                 if(field)control.object[field][axis]=this.dragStart[field][axis];
@@ -111,6 +113,7 @@ export class EditorPlugin {
     // Decide which set of rings owns the gesture before Three.js handles it.
     // Small bone rings take priority where their hit areas overlap the outer gizmo.
     routePointer(event) {
+        if(this.restoring)return;
         if (this.viewer.getPlugin('PosePlugin')?.ikControl) return;
         if (this.transformControl.dragging || this.boneControl.dragging || this.mode === 'view') return;
         this.syncBoneHandle();
@@ -171,7 +174,7 @@ export class EditorPlugin {
             objectsToCheck = [...objectsToCheck, ...itemsPlugin.items];
         }
 
-        return this.raycaster.intersectObjects(objectsToCheck, false);
+        return this.raycaster.intersectObjects(objectsToCheck, true).filter(hit=>{for(let o=hit.object;o;o=o.parent)if(!o.visible||o.userData.isGlow||o.userData.isGlowLayer)return false;return true;});
     }
 
     handleHover(event) {
@@ -216,6 +219,7 @@ export class EditorPlugin {
     }
 
     handleClick(event) {
+        if(this.restoring)return;
         if (this.viewer.getPlugin('PosePlugin')?.ikControl) return;
         if (event.button !== 0 || this.transformControl.dragging || this.boneControl.dragging || this.transformControl.axis || this.boneControl.axis) return;
         this.viewer.skinModel.updateBones();
@@ -237,10 +241,11 @@ export class EditorPlugin {
         }
 
         const intersects = this.raycaster.intersectObjects(objectsToCheck, true)
-            .filter(hit => !hit.object.userData.isGlow && !hit.object.userData.isGlowLayer && hit.object.visible);
+            .filter(hit => {for(let o=hit.object;o;o=o.parent)if(!o.visible||o.userData.isGlow||o.userData.isGlowLayer)return false;return true;});
 
         if (intersects.length > 0) {
             let hitObject = intersects[0].object;
+            const previousSelection=[...this.selectedObjects];
             const owner=this.viewer.characterForObject(hitObject);
             if(owner)this.viewer.selectCharacter(owner.id);
             let logicalTarget = hitObject;
@@ -261,6 +266,8 @@ export class EditorPlugin {
             }
 
             if (!logicalTarget) logicalTarget = hitObject;
+            for(let parent=logicalTarget.parent;parent;parent=parent.parent)if(parent.userData.sceneGroup)logicalTarget=parent;
+            if(event.ctrlKey||event.metaKey){this.selectObjects(previousSelection.includes(logicalTarget)?previousSelection.filter(o=>o!==logicalTarget):[...previousSelection,logicalTarget]);return;}
 
             if (this.transformControl.object !== logicalTarget) {
                 this.selectObject(logicalTarget);
@@ -276,6 +283,7 @@ export class EditorPlugin {
         const owner=this.viewer.characterForObject(obj);
         if(owner)this.viewer.selectCharacter(owner.id);
         this.selectedObject = obj;
+        this.selectedObjects = [obj];
         const model = this.viewer.skinModel;
         const parentName = JOINTS[obj.name];
         const main = parentName ? model.parts[parentName] : obj;
@@ -291,11 +299,24 @@ export class EditorPlugin {
         this.viewer.emit('selection:change', obj);
     }
 
+    selectObjects(objects,active=objects.at(-1)) {
+        objects=[...new Set(objects.filter(Boolean))];
+        if(!objects.length)return this.deselect();
+        if(objects.length===1)return this.selectObject(objects[0]);
+        if(!objects.includes(active))active=objects.at(-1);
+        const owner=this.viewer.characterForObject(active);if(owner)this.viewer.selectCharacter(owner.id);
+        this.selectedObjects=objects;this.selectedObject=active;
+        this.boneTarget=null;this.boneControl.detach();
+        const effects=this.viewer.getPlugin('EffectsPlugin');if(effects)effects.composer.outlinePass.selectedObjects=objects;
+        this.viewer.emit('selection:change',active);
+    }
+
     deselect() {
         this.transformControl.detach();
         this.boneControl.detach();
         this.boneTarget = null;
         this.selectedObject = null;
+        this.selectedObjects = [];
         const fx = this.viewer.getPlugin('EffectsPlugin');
         if (fx) fx.setSelected(null);
         this.viewer.emit('selection:cleared');
@@ -325,6 +346,7 @@ export class EditorPlugin {
     // --- HISTORY API ---
 
     getSnapshot() {
+        if(this.viewer.getPlugin('SceneToolsPlugin'))return null;
         const pose = this.viewer.skinModel.getPose();
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const itemsState = itemsPlugin ? itemsPlugin.getSnapshot() : [];
@@ -332,8 +354,8 @@ export class EditorPlugin {
     }
 
     saveHistory() { if(this.restoring)return;this.history.pushState(this.getSnapshot()); }
-    undo() { this.history.undo(this.getSnapshot()); }
-    redo() { this.history.redo(this.getSnapshot()); }
+    undo() { return this.history.undo(this.getSnapshot()); }
+    redo() { return this.history.redo(this.getSnapshot()); }
 
     restoreState(state) {
         this.restoring=true;
