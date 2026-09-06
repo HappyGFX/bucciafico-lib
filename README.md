@@ -322,3 +322,7 @@ Validation:
 `npm --prefix apps/api test`,
 `node apps/api/test/browser-posing.mjs` and
 `node apps/api/test/browser-posing-ui.mjs` (Studio at localhost:3031).
+
+### Client-side resource library
+
+Studio includes a versioned Minecraft Java 26.2 block/item library, local ZIP/folder resource packs, static resource properties and portable project resources. See [resource library documentation](docs/resources.md) for interfaces, supported formats and validation commands.

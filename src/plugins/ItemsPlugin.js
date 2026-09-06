@@ -1,6 +1,7 @@
+import {ResourceItemMethods} from './ResourceItemMethods.js';
 import {EquipmentMethods} from './EquipmentMethods.js';
 import * as THREE from 'three';
-import { ItemFactory } from '../objects/ItemFactory.js';
+import {ItemFactory} from '../objects/ItemFactory.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {createGlowMaterial} from "../materials/GlowMaterial.js";
 
@@ -18,23 +19,21 @@ export class ItemsPlugin {
 
     init(viewer) {
         this.viewer = viewer;
-        this.unsubs=['transform:change','characters:change','skin:loaded','pose:change'].map(event=>viewer.on(event,()=>this.updateEquipment()));
+        this.unsubs = ['transform:change', 'characters:change', 'skin:loaded', 'pose:change'].map(event => viewer.on(event, () => this.updateEquipment()));
     }
 
-    attachItem(itemMesh, partName, characterId=this.viewer.activeCharacter.id) {
+    attachItem(itemMesh, partName, characterId = this.viewer.activeCharacter.id) {
         const editor = this.viewer.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();
 
         const skinModel = this.viewer.getCharacter(characterId)?.model;
-        if(partName&&!skinModel?.getAttachment(partName))throw new Error('Nie znaleziono części ciała.');
+        if (partName && !skinModel?.getAttachment(partName)) throw new Error('Nie znaleziono części ciała.');
 
         if (!partName) {
             this.viewer.scene.attach(itemMesh);
             itemMesh.userData.parentId = null;
             itemMesh.userData.characterId = null;
-        }
-
-        else if (skinModel.getAttachment(partName)) {
+        } else if (skinModel.getAttachment(partName)) {
             const targetGroup = skinModel.getAttachment(partName);
             targetGroup.attach(itemMesh);
             itemMesh.userData.parentId = partName;
@@ -94,7 +93,7 @@ export class ItemsPlugin {
         return ItemFactory.createFromURL(url, name).then(mesh => {
             mesh.position.set(8, 8, 8);
             mesh.userData.sourceUrl = url;
-            mesh.userData.pixelScale=mesh.scale.x;
+            mesh.userData.pixelScale = mesh.scale.x;
 
             this._addGlowShells(mesh);
 
@@ -119,6 +118,7 @@ export class ItemsPlugin {
         const editor = this.viewer.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();
 
+        if (mesh.userData.resourceSpec) mesh.userData.resourceToken = (mesh.userData.resourceToken || 0) + 1;
         mesh.removeFromParent();
         this.items = this.items.filter(i => i !== mesh);
 
@@ -172,14 +172,15 @@ export class ItemsPlugin {
             characterId: item.userData.characterId || null,
             pos: item.position.toArray(),
             rot: item.rotation.toArray(),
-            equipment:this.equipmentData(item),
+            equipment: this.equipmentData(item),
+            resource: item.userData.resourceSpec ? structuredClone(item.userData.resourceSpec) : undefined,
             scale: item.scale.toArray()
         }));
     }
 
     restoreSnapshot(itemsState) {
         itemsState.forEach(state => {
-            let item = this.items.find(i => state.uuid?i.uuid===state.uuid:i.name===state.name);
+            let item = this.items.find(i => state.uuid ? i.uuid === state.uuid : i.name === state.name);
             if (item) {
                 if (state.parentId !== item.userData.parentId || state.characterId !== item.userData.characterId) {
                     this.attachItem(item, state.parentId, state.characterId);
@@ -188,18 +189,27 @@ export class ItemsPlugin {
                 item.position.fromArray(state.pos);
                 item.rotation.fromArray(state.rot);
                 item.scale.fromArray(state.scale);
-                this.restoreEquipmentData(item,state.equipment);
+                this.restoreEquipmentData(item, state.equipment);
+                if (state.resource && JSON.stringify(state.resource) !== JSON.stringify(item.userData.resourceSpec)) {
+                    item.userData.resourceSpec = structuredClone(state.resource);
+                    this.populateAsset(item, true);
+                }
             }
         });
     }
 
     dispose() {
-        this.unsubs?.forEach(fn=>fn());
+        this.resourceUnsub?.();
+        this.unsubs?.forEach(fn => fn());
         this.items.forEach(mesh => {
             this.viewer.scene.remove(mesh);
             disposeObjectTree(mesh);
         });
         this.items = [];
+        this.resourceRenderer?.dispose();
     }
 }
-Object.assign(ItemsPlugin.prototype,EquipmentMethods);
+
+Object.assign(ItemsPlugin.prototype, EquipmentMethods);
+
+Object.assign(ItemsPlugin.prototype, ResourceItemMethods);
