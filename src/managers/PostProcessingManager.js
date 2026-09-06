@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import {createAntialiasedComposer} from '../utils/Antialiasing.js';
+import {RenderPass} from 'three/examples/jsm/postprocessing/RenderPass.js';
+import {ShaderPass} from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import {UnrealBloomPass} from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/examples/jsm/postprocessing/OutputPass.js';
+import {OutlinePass} from 'three/examples/jsm/postprocessing/OutlinePass.js';
 
 /**
  * Handles the post-processing pipeline (Bloom, Outline, Color Correction).
@@ -21,7 +21,7 @@ export class PostProcessingManager {
         const virtualH = this.INTERNAL_HEIGHT;
 
         // 1. BLOOM COMPOSER (Renders glow map)
-        this.bloomComposer = new EffectComposer(renderer);
+        this.bloomComposer = createAntialiasedComposer(renderer, width, height);
         this.bloomComposer.renderToScreen = false;
         this.bloomComposer.setSize(virtualW, virtualH);
         this.bloomComposer.addPass(new RenderPass(scene, camera));
@@ -30,7 +30,7 @@ export class PostProcessingManager {
         this.bloomComposer.addPass(this.bloomPass);
 
         // 2. FINAL COMPOSER
-        this.finalComposer = new EffectComposer(renderer);
+        this.finalComposer = createAntialiasedComposer(renderer, width, height);
         this.finalComposer.setSize(width, height);
         this.finalComposer.addPass(new RenderPass(scene, camera));
 
@@ -44,8 +44,8 @@ export class PostProcessingManager {
         // 4. MIX SHADER (Combines Base + Bloom preserving Alpha)
         const MixShader = {
             uniforms: {
-                tDiffuse: { value: null },
-                bloomTexture: { value: null }
+                tDiffuse: {value: null},
+                bloomTexture: {value: null}
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -91,6 +91,9 @@ export class PostProcessingManager {
     }
 
     resize(width, height) {
+        const pixelRatio = this.renderer.getPixelRatio();
+        this.bloomComposer.setPixelRatio(pixelRatio);
+        this.finalComposer.setPixelRatio(pixelRatio);
         const ratio = width / height;
 
         const virtualH = this.INTERNAL_HEIGHT;
@@ -99,7 +102,7 @@ export class PostProcessingManager {
         this.bloomComposer.setSize(virtualW, virtualH);
         this.finalComposer.setSize(width, height);
         this.bloomPass.resolution.set(virtualW, virtualH);
-        this.outlinePass.setSize(width, height);
+        // Composer also resizes selection buffers at the actual pixel ratio.
     }
 
     /**

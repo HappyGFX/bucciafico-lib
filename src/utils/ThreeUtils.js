@@ -19,7 +19,7 @@ export function disposeObjectTree(object, {textures = true} = {}) {
     }
 
     object.traverse((child) => {
-        child.userData.darkMat?.dispose();
+        for (const material of [child.userData.darkMat].flat()) material?.dispose();
         if (child.geometry) {
             child.geometry.dispose();
         }

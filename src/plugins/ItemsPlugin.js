@@ -3,7 +3,7 @@ import {EquipmentMethods} from './EquipmentMethods.js';
 import * as THREE from 'three';
 import {ItemFactory} from '../objects/ItemFactory.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
-import {createGlowMaterial} from "../materials/GlowMaterial.js";
+import {createGlowMaterial, updateWorldGlow} from "../materials/GlowMaterial.js";
 
 /**
  * Plugin responsible for managing 3D Items (Swords, Blocks).
@@ -47,21 +47,23 @@ export class ItemsPlugin {
         if (this.viewer.emit) this.viewer.emit('transform:change', itemMesh);
     }
 
-    _addGlowShells(mesh) {
+    _addGlowShells(mesh, gradient = null) {
+        if (mesh.userData.glowLayers) return;
         mesh.geometry.computeBoundingBox();
         const size = new THREE.Vector3();
         mesh.geometry.boundingBox.getSize(size);
-        const itemHeight = size.y || 1;
+        const itemHeight = gradient?.height || size.y || 1;
 
         const glowLayers = [];
 
         const glowGroup = new THREE.Group();
         glowGroup.name = "GlowShells";
 
-        const shellGeo = mesh.geometry.clone();
+        // Resource instances own their materials; their cached geometry stays shared.
+        const shellGeo = gradient ? mesh.geometry : mesh.geometry.clone();
 
         for (let i = 0; i < this.LAYERS_COUNT; i++) {
-            const glowMat = createGlowMaterial(itemHeight);
+            const glowMat = createGlowMaterial(itemHeight, mesh.material.map || null, gradient || {minY: mesh.geometry.boundingBox.min.y});
 
             glowMat.uniforms.thickness.value = 0;
             glowMat.uniforms.opacity.value = 0;
@@ -72,6 +74,7 @@ export class ItemsPlugin {
             const layerMesh = new THREE.Mesh(shellGeo, glowMat);
             layerMesh.userData.isGlowLayer = true;
             layerMesh.userData.glowMat = glowMat;
+            layerMesh.visible = false;
 
             glowLayers.push(layerMesh);
             glowGroup.add(layerMesh);
@@ -131,6 +134,17 @@ export class ItemsPlugin {
 
     // --- EFFECTS ---
 
+    updateWorldGlow() {
+        for (const item of this.items) {
+            const sources = [], layers = [];
+            item.traverse(mesh => {
+                if (!mesh.isMesh) return;
+                (mesh.userData.isGlowLayer ? layers : sources).push(mesh);
+            });
+            updateWorldGlow(layers, sources);
+        }
+    }
+
     updateAllGlow(config) {
         this.items.forEach(item => {
             this.updateItemGlow(item, config);
@@ -138,6 +152,32 @@ export class ItemsPlugin {
     }
 
     updateItemGlow(item, config) {
+        if (item.userData.resourceSpec) {
+            if (item.userData.resourceError) return;
+            const meshes = [];
+            item.traverse(mesh => {
+                if (mesh.isMesh && !mesh.userData.isGlowLayer) meshes.push(mesh);
+            });
+            if (config.enabled && meshes.some(mesh => !mesh.userData.glowLayers)) {
+                item.updateWorldMatrix(true, true);
+                const inverse = item.matrixWorld.clone().invert();
+                const bounds = new THREE.Box3();
+                const transforms = new Map();
+                for (const mesh of meshes) {
+                    const matrix = new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld);
+                    transforms.set(mesh, matrix);
+                    mesh.geometry.computeBoundingBox();
+                    bounds.union(mesh.geometry.boundingBox.clone().applyMatrix4(matrix));
+                }
+                for (const mesh of meshes) this._addGlowShells(mesh, {
+                    height: Math.max(bounds.max.y - bounds.min.y, 0.001),
+                    minY: bounds.min.y,
+                    matrix: transforms.get(mesh),
+                });
+            }
+            for (const mesh of meshes) this.updateItemGlow(mesh, config);
+            return;
+        }
         if (!item.userData.glowLayers) return;
 
         const maxThickness = (config.thickness || 4) * 0.05;
@@ -145,6 +185,7 @@ export class ItemsPlugin {
         const enabled = config.enabled;
 
         item.userData.glowLayers.forEach((layer, i) => {
+            layer.visible = !!enabled;
             const mat = layer.userData.glowMat;
             if (!mat) return;
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PostProcessingManager } from '../managers/PostProcessingManager.js';
+import {PostProcessingManager} from '../managers/PostProcessingManager.js';
 
 /**
  * Plugin responsible for visual effects and post-processing.
@@ -32,7 +32,7 @@ export class EffectsPlugin {
      * @param {Object} config - { enabled, strength, radius, height, thickness }
      */
     updateConfig(config) {
-        this.state = { ...this.state, ...config };
+        this.state = {...this.state, ...config};
 
         this._applyToScene();
     }
@@ -53,7 +53,11 @@ export class EffectsPlugin {
         const skin = this.viewer.skinModel;
         skin.updateBones();
 
-        for(const {model} of this.viewer.characters){model.setGlowEffect(config.enabled);model.updateBorderThickness(config.thickness);model.updateGlowHeight(config.height);}
+        for (const {model} of this.viewer.characters) {
+            model.setGlowEffect(config.enabled);
+            model.updateBorderThickness(config.thickness);
+            model.updateGlowHeight(config.height);
+        }
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
@@ -61,6 +65,7 @@ export class EffectsPlugin {
         }
 
         this.composer.setBloom(config.enabled, config.strength, config.radius, 0.85);
+        this.viewer.requestRender();
     }
 
     /**
@@ -79,25 +84,39 @@ export class EffectsPlugin {
      */
     render() {
         const skin = this.viewer.skinModel;
-        this.viewer.characters.forEach(c=>c.model.updateBones());
+        this.viewer.characters.forEach(c => c.model.updateBones());
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         const items = itemsPlugin ? itemsPlugin.items : [];
+        itemsPlugin?.updateWorldGlow();
         const equipmentMaterials = new Map();
 
         this.composer.renderSelective(
             () => {
-                this.viewer.characters.forEach(c=>c.model.darkenBody());
+                this.viewer.characters.forEach(c => c.model.darkenBody());
                 this.viewer.sceneSetup.setGridVisible(false);
                 items.forEach(item => item.traverse(mesh => {
-                    if(!mesh.isMesh || mesh.userData.isGlowLayer) return;
-                    equipmentMaterials.set(mesh,mesh.material);
-                    mesh.material=skin.blackMaterial;
+                    if (!mesh.isMesh || mesh.userData.isGlowLayer) return;
+                    equipmentMaterials.set(mesh, mesh.material);
+                    // Keep texture alpha and face settings in the bloom occlusion pass.
+                    if (!mesh.userData.darkMat) {
+                        const darken = material => {
+                            const dark = material.clone();
+                            dark.color?.set(0);
+                            dark.emissive?.set(0);
+                            return dark;
+                        };
+                        mesh.userData.darkMat = Array.isArray(mesh.material)
+                            ? mesh.material.map(darken) : darken(mesh.material);
+                    }
+                    mesh.material = mesh.userData.darkMat;
                 }));
             },
             () => {
-                this.viewer.characters.forEach(c=>c.model.restoreBody());
+                this.viewer.characters.forEach(c => c.model.restoreBody());
                 this.viewer.sceneSetup.setGridVisible(this.viewer.config.showGrid);
-                equipmentMaterials.forEach((material,mesh)=>{mesh.material=material;});
+                equipmentMaterials.forEach((material, mesh) => {
+                    mesh.material = material;
+                });
             }
         );
     }
@@ -106,7 +125,7 @@ export class EffectsPlugin {
      * Returns the current configuration state.
      */
     getConfig() {
-        return { ...this.state };
+        return {...this.state};
     }
 
     /**

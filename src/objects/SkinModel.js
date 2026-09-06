@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { createVoxelLayer } from '../utils/Voxelizer.js';
-import { applySkinUVs } from '../utils/SkinUtils.js';
-import { createGlowMaterial } from '../materials/GlowMaterial.js';
+import {createVoxelLayer} from '../utils/Voxelizer.js';
+import {applySkinUVs} from '../utils/SkinUtils.js';
+import {createGlowMaterial, updateWorldGlow} from '../materials/GlowMaterial.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
-import { JOINTS, JointBinding } from "./BoneRig.js";
+import {JointBinding, JOINTS} from "./BoneRig.js";
 
 /**
  * Represents the Minecraft Character Model (Steve/Alex).
@@ -13,12 +13,12 @@ export class SkinModel {
     constructor() {
         this.playerGroup = new THREE.Group();
         this.parts = {};
-        this.visibility = { base:true, outer:true, parts:{}, outerParts:{} };
+        this.visibility = {base: true, outer: true, parts: {}, outerParts: {}};
         this.jointBindings = [];
         this.glowMeshes = [];
         this.bodyMeshes = [];
         this.defaultPositions = {};
-        this.blackMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        this.blackMaterial = new THREE.MeshBasicMaterial({color: 0x000000});
 
         this.LAYERS_COUNT = 20;
     }
@@ -28,28 +28,40 @@ export class SkinModel {
      * Adds Inner layer (Box), Outer layer (Voxels), and Glow mesh.
      */
     createBodyPart(texture, coords, size, pivotPos, meshOffset, name, renderVoxels = true) {
-        const pivot = new THREE.Bone();pivot.name=name;pivot.position.copy(pivotPos);
-        this.defaultPositions[name]=pivotPos.clone();
-        const meshGroup=new THREE.Group();meshGroup.position.copy(meshOffset);pivot.add(meshGroup);
-        for(const layer of (renderVoxels ? ['base','outer'] : ['base'])) {
-            const uv=layer==='base'?coords.inner:coords.outer;
-            const geometry=layer==='outer'
-                ? createVoxelLayer(texture,{uv:coords,size})
-                : new THREE.BoxGeometry(size.w,size.h,size.d);
-            if(!geometry) continue;
-            if(layer==='base') applySkinUVs(geometry,uv.x,uv.y,size.w,size.h,size.d);
+        const pivot = new THREE.Bone();
+        pivot.name = name;
+        pivot.position.copy(pivotPos);
+        this.defaultPositions[name] = pivotPos.clone();
+        const meshGroup = new THREE.Group();
+        meshGroup.position.copy(meshOffset);
+        pivot.add(meshGroup);
+        for (const layer of (renderVoxels ? ['base', 'outer'] : ['base'])) {
+            const uv = layer === 'base' ? coords.inner : coords.outer;
+            const geometry = layer === 'outer'
+                ? createVoxelLayer(texture, {uv: coords, size})
+                : new THREE.BoxGeometry(size.w, size.h, size.d);
+            if (!geometry) continue;
+            if (layer === 'base') applySkinUVs(geometry, uv.x, uv.y, size.w, size.h, size.d);
             // Extruded pixels must occlude their rear walls and neighbouring body parts.
             // Alpha testing keeps empty texels clear without disabling depth writes.
-            const material=new THREE.MeshStandardMaterial({map:texture,transparent:true,alphaTest:1/255,side:THREE.DoubleSide,depthWrite:true});
-            const mesh=new THREE.Mesh(geometry,material);
-            mesh.userData={originalMat:material,skinPart:name,skinLayer:layer};
-            meshGroup.add(mesh);this.bodyMeshes.push(mesh);
-            const shells=[];
-            for(let i=0;i<this.LAYERS_COUNT;i++) {
-                const glowMat=createGlowMaterial(size.h,texture);
-                const shell=new THREE.Mesh(geometry,glowMat);
-                shell.userData={layerIndex:i,isGlow:true,glowMat,skinPart:name,skinLayer:layer};
-                meshGroup.add(shell);shells.push(shell);
+            const material = new THREE.MeshStandardMaterial({
+                map: texture,
+                transparent: true,
+                alphaTest: 1 / 255,
+                side: THREE.DoubleSide,
+                depthWrite: true
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.userData = {originalMat: material, skinPart: name, skinLayer: layer};
+            meshGroup.add(mesh);
+            this.bodyMeshes.push(mesh);
+            const shells = [];
+            for (let i = 0; i < this.LAYERS_COUNT; i++) {
+                const glowMat = createGlowMaterial(size.h, texture);
+                const shell = new THREE.Mesh(geometry, glowMat);
+                shell.userData = {layerIndex: i, isGlow: true, glowMat, skinPart: name, skinLayer: layer};
+                meshGroup.add(shell);
+                shells.push(shell);
             }
             this.glowMeshes.push(shells);
         }
@@ -64,9 +76,9 @@ export class SkinModel {
      */
     build(texture, isSlim = false, renderVoxels = true) {
         if (!this.playerGroup) return;
-        const oldTexture=this.texture;
-        this.texture=texture;
-        this.isSlim=isSlim;
+        const oldTexture = this.texture;
+        this.texture = texture;
+        this.isSlim = isSlim;
 
         let capeBackup = null;
         if (this.parts.cape) {
@@ -87,7 +99,7 @@ export class SkinModel {
         }
 
         if (this.playerGroup.children.length > 0) {
-            disposeObjectTree(this.playerGroup, {textures:false});
+            disposeObjectTree(this.playerGroup, {textures: false});
             this.playerGroup.clear();
         }
 
@@ -101,12 +113,42 @@ export class SkinModel {
         const armOff = isSlim ? 5.5 : 6.0;
 
         const defs = {
-            head: { uv: { inner: {x:0, y:0}, outer: {x:32, y:0} }, size: { w:8, h:8, d:8 }, pivotPos: new THREE.Vector3(0, 0, 0), meshOffset: new THREE.Vector3(0, 4, 0) },
-            body: { uv: { inner: {x:16, y:16}, outer: {x:16, y:32} }, size: { w:8, h:12, d:4 }, pivotPos: new THREE.Vector3(0, -6, 0), meshOffset: new THREE.Vector3(0, 0, 0) },
-            rightArm: { uv: { inner: {x:40, y:16}, outer: {x:40, y:32} }, size: { w:armW, h:12, d:4 }, pivotPos: new THREE.Vector3(-armOff, -2, 0), meshOffset: new THREE.Vector3(0, -4, 0) },
-            leftArm: { uv: { inner: {x:32, y:48}, outer: {x:48, y:48} }, size: { w:armW, h:12, d:4 }, pivotPos: new THREE.Vector3(armOff, -2, 0), meshOffset: new THREE.Vector3(0, -4, 0) },
-            rightLeg: { uv: { inner: {x:0, y:16}, outer: {x:0, y:32} }, size: { w:4, h:12, d:4 }, pivotPos: new THREE.Vector3(-2, -12, 0), meshOffset: new THREE.Vector3(0, -6, 0) },
-            leftLeg: { uv: { inner: {x:16, y:48}, outer: {x:0, y:48} }, size: { w:4, h:12, d:4 }, pivotPos: new THREE.Vector3(2, -12, 0), meshOffset: new THREE.Vector3(0, -6, 0) }
+            head: {
+                uv: {inner: {x: 0, y: 0}, outer: {x: 32, y: 0}},
+                size: {w: 8, h: 8, d: 8},
+                pivotPos: new THREE.Vector3(0, 0, 0),
+                meshOffset: new THREE.Vector3(0, 4, 0)
+            },
+            body: {
+                uv: {inner: {x: 16, y: 16}, outer: {x: 16, y: 32}},
+                size: {w: 8, h: 12, d: 4},
+                pivotPos: new THREE.Vector3(0, -6, 0),
+                meshOffset: new THREE.Vector3(0, 0, 0)
+            },
+            rightArm: {
+                uv: {inner: {x: 40, y: 16}, outer: {x: 40, y: 32}},
+                size: {w: armW, h: 12, d: 4},
+                pivotPos: new THREE.Vector3(-armOff, -2, 0),
+                meshOffset: new THREE.Vector3(0, -4, 0)
+            },
+            leftArm: {
+                uv: {inner: {x: 32, y: 48}, outer: {x: 48, y: 48}},
+                size: {w: armW, h: 12, d: 4},
+                pivotPos: new THREE.Vector3(armOff, -2, 0),
+                meshOffset: new THREE.Vector3(0, -4, 0)
+            },
+            rightLeg: {
+                uv: {inner: {x: 0, y: 16}, outer: {x: 0, y: 32}},
+                size: {w: 4, h: 12, d: 4},
+                pivotPos: new THREE.Vector3(-2, -12, 0),
+                meshOffset: new THREE.Vector3(0, -6, 0)
+            },
+            leftLeg: {
+                uv: {inner: {x: 16, y: 48}, outer: {x: 0, y: 48}},
+                size: {w: 4, h: 12, d: 4},
+                pivotPos: new THREE.Vector3(2, -12, 0),
+                meshOffset: new THREE.Vector3(0, -6, 0)
+            }
         };
 
         for (const [name, def] of Object.entries(defs)) {
@@ -137,13 +179,17 @@ export class SkinModel {
         for (const name of ['head', 'rightArm', 'leftArm']) this.upperBody.add(this.parts[name]);
         this.updateBones();
 
-        this.sockets={};
-        for(const [name,parent,y] of [['rightHand','rightElbow',-5.5],['leftHand','leftElbow',-5.5],['rightFoot','rightKnee',-6],['leftFoot','leftKnee',-6]]){
-            const socket=new THREE.Object3D();socket.name=name;socket.position.y=y;this.parts[parent].add(socket);this.sockets[name]=socket;
+        this.sockets = {};
+        for (const [name, parent, y] of [['rightHand', 'rightElbow', -5.5], ['leftHand', 'leftElbow', -5.5], ['rightFoot', 'rightKnee', -6], ['leftFoot', 'leftKnee', -6]]) {
+            const socket = new THREE.Object3D();
+            socket.name = name;
+            socket.position.y = y;
+            this.parts[parent].add(socket);
+            this.sockets[name] = socket;
         }
         this.updateBones();
         this.applyVisibility();
-        if(oldTexture && oldTexture!==texture)oldTexture.dispose();
+        if (oldTexture && oldTexture !== texture) oldTexture.dispose();
         if (capeBackup && capeBackup.texture) {
             this.setCape(capeBackup.texture);
 
@@ -176,8 +222,9 @@ export class SkinModel {
                 this.glowMeshes = this.glowMeshes.filter(layers => layers !== layersToRemove);
             }
 
-            const removed=new Set();this.parts.cape.traverse(mesh=>removed.add(mesh));
-            this.bodyMeshes=this.bodyMeshes.filter(mesh=>!removed.has(mesh));
+            const removed = new Set();
+            this.parts.cape.traverse(mesh => removed.add(mesh));
+            this.bodyMeshes = this.bodyMeshes.filter(mesh => !removed.has(mesh));
             this.parts.cape.removeFromParent();
             disposeObjectTree(this.parts.cape);
             delete this.parts.cape;
@@ -185,7 +232,7 @@ export class SkinModel {
 
         if (!texture) return;
 
-        const size = { w: 10, h: 16, d: 1 };
+        const size = {w: 10, h: 16, d: 1};
         const pivotPos = new THREE.Vector3(0, 0, -3);
         const meshOffset = new THREE.Vector3(0, -8, 0.6);
 
@@ -252,23 +299,37 @@ export class SkinModel {
         this.parts['cape'] = pivotGroup;
     }
 
-    getGroup() { return this.playerGroup; }
+    getGroup() {
+        return this.playerGroup;
+    }
 
     setVisibility(patch) {
-        this.visibility={...this.visibility,...patch,parts:{...this.visibility.parts,...patch.parts},outerParts:{...this.visibility.outerParts,...patch.outerParts}};
+        this.visibility = {
+            ...this.visibility, ...patch,
+            parts: {...this.visibility.parts, ...patch.parts},
+            outerParts: {...this.visibility.outerParts, ...patch.outerParts}
+        };
         this.applyVisibility();
     }
+
     applyVisibility() {
-        this.playerGroup.traverse(mesh=>{
-            const {skinPart,skinLayer}=mesh.userData;
-            if(mesh.userData.parentId){const part=JOINTS[mesh.userData.parentId]||mesh.userData.parentId;mesh.visible=this.visibility.parts[part]!==false;}
-            if(skinPart)mesh.visible=this.visibility.parts[skinPart]!==false && this.visibility[skinLayer]!==false && (skinLayer!=='outer'||this.visibility.outerParts[skinPart]!==false);
+        this.playerGroup.traverse(mesh => {
+            const {skinPart, skinLayer} = mesh.userData;
+            if (mesh.userData.parentId) {
+                const part = JOINTS[mesh.userData.parentId] || mesh.userData.parentId;
+                mesh.visible = this.visibility.parts[part] !== false;
+            }
+            if (skinPart) mesh.visible = this.visibility.parts[skinPart] !== false && this.visibility[skinLayer] !== false && (skinLayer !== 'outer' || this.visibility.outerParts[skinPart] !== false);
         });
     }
 
-    getAttachment(name) { return name==='root'?this.playerGroup:(this.sockets?.[name] || this.parts[name]); }
+    getAttachment(name) {
+        return name === 'root' ? this.playerGroup : (this.sockets?.[name] || this.parts[name]);
+    }
 
-    getBones() { return Object.keys(this.parts).filter(name => this.parts[name].isBone); }
+    getBones() {
+        return Object.keys(this.parts).filter(name => this.parts[name].isBone);
+    }
 
     getBone(name) {
         const bone = Object.hasOwn(this.parts, name) ? this.parts[name] : null;
@@ -288,6 +349,7 @@ export class SkinModel {
     updateBones() {
         this.jointBindings.forEach(binding => binding.update());
         this.playerGroup?.updateMatrixWorld(true);
+        this.glowMeshes.forEach(layers => updateWorldGlow(layers));
     }
 
     /**
@@ -325,15 +387,20 @@ export class SkinModel {
     }
 
     darkenBody() {
-        this.bodyMeshes.forEach(mesh=>{
-            if(!mesh.userData.darkMat){
-                const material=mesh.userData.originalMat.clone();material.color.set(0);material.emissive?.set(0);
-                mesh.userData.darkMat=material;
+        this.bodyMeshes.forEach(mesh => {
+            if (!mesh.userData.darkMat) {
+                const material = mesh.userData.originalMat.clone();
+                material.color.set(0);
+                material.emissive?.set(0);
+                mesh.userData.darkMat = material;
             }
-            mesh.material=mesh.userData.darkMat;
+            mesh.material = mesh.userData.darkMat;
         });
     }
-    restoreBody() { this.bodyMeshes.forEach(m => m.material = m.userData.originalMat); }
+
+    restoreBody() {
+        this.bodyMeshes.forEach(m => m.material = m.userData.originalMat);
+    }
 
     /**
      * Applies a pose to the model.
@@ -353,7 +420,10 @@ export class SkinModel {
         this.playerGroup.rotation.set(0, 0, 0);
         this.playerGroup.scale.set(1, 1, 1);
 
-        if (!pose) { this.updateBones(); return; }
+        if (!pose) {
+            this.updateBones();
+            return;
+        }
 
         if (pose.root) {
             if (pose.root.pos) this.playerGroup.position.fromArray(pose.root.pos);
