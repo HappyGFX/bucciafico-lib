@@ -133,6 +133,12 @@ export class ItemsPlugin {
         this.viewer.emit('items:added',root);this.viewer.requestRender();return root;
     }
 
+    addMissingItem(record,error) {
+        const mesh=new THREE.Mesh(new THREE.BoxGeometry(12,12,12),new THREE.MeshBasicMaterial({color:0xff35b8,wireframe:true}));
+        mesh.name=record.name||'Missing object';
+        mesh.userData.missingSource=structuredClone(record.missingSource||{sourceUrl:record.sourceUrl,resource:record.resource,importedModel:record.importedModel,resourceScope:record.resourceScope,error});
+        mesh.userData.resourceError=error;this.viewer.scene.add(mesh);this.items.push(mesh);this.viewer.emit('items:added',mesh);return mesh;
+    }
     removeItem(mesh) {
         const editor = this.viewer.getPlugin('EditorPlugin');
         if (editor) editor.saveHistory();

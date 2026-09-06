@@ -12,3 +12,8 @@ export { MINECRAFT_LIGHTING } from './src/objects/SceneSetup.js';
 export {SceneToolsPlugin} from './src/plugins/SceneToolsPlugin.js';
 export {ModelAdapterRegistry,ImportedModelStore} from './src/resources/ModelAdapters.js';
 export {unpackProjectAssets} from './src/utils/ProjectAssets.js';
+
+
+export {ProjectController} from './src/managers/ProjectController.js';
+export {ProjectStore} from './src/managers/ProjectStore.js';
+export {validateProject,PROJECT_VERSION} from './src/utils/ProjectDocument.js';

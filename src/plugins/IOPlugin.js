@@ -1,4 +1,5 @@
 import {poolProjectAssets,unpackProjectAssets} from '../utils/ProjectAssets.js';
+import {validateProject,PROJECT_VERSION,DEFAULT_RENDER_SETTINGS} from '../utils/ProjectDocument.js';
 const embeddedImages=new WeakMap();
 function embeddedImage(texture){
     const image=texture?.image;if(!image)return null;
@@ -33,7 +34,7 @@ export class IOPlugin {
         const state = {
             meta: {
                 generator: "Bucciafico Studio",
-                version: "1.3.0",
+                version: PROJECT_VERSION,
                 timestamp: Date.now()
             },
             core: {}
@@ -102,6 +103,8 @@ export class IOPlugin {
                         resourceScope: item.userData.resourceScope,
                         sceneParentId: item.parent?.userData.sceneGroup ? item.parent.uuid : null,
                         visible: item.visible,
+                        locked: !!item.userData.editLocked,
+                        missingSource: item.userData.missingSource,
                         parentId: item.userData.parentId || null,
                         characterId: item.userData.characterId || null,
                         transform: Object.keys(transform).length > 0 ? transform : undefined
@@ -112,9 +115,12 @@ export class IOPlugin {
 
         const resourceManager = this.viewer.getPlugin('ItemsPlugin')?.resources;
         if (options.items && resourceManager) state.resources = resourceManager.serialize();
-        state.poseLibrary = this.viewer.getPlugin('PosePlugin')?.library || [];
+        state.poseLibrary = this.viewer.projectPoseLibrary?.length ? this.viewer.projectPoseLibrary : this.viewer.getPlugin('PosePlugin')?.library || [];
         state.poseSettings = this.viewer.getPlugin('PosePlugin')?.settings;
         state.activeCharacterId = this.viewer.activeCharacter?.id || null;
+        state.documentName=this.viewer.projectName||'Untitled';
+        state.cameras=structuredClone(this.viewer.savedCameras||[]);
+        state.renderSettings={...DEFAULT_RENDER_SETTINGS,...this.viewer.renderSettings};
         state.groups = this.viewer.getPlugin('SceneToolsPlugin')?.serializeGroups() || [];
         state.sceneTools = this.viewer.getPlugin('SceneToolsPlugin')?.settings;
         if(options.items){
@@ -132,6 +138,8 @@ export class IOPlugin {
             }
             result.sceneParentId=c.model.getGroup().parent?.userData.sceneGroup ? c.model.getGroup().parent.uuid : null;
             result.visible=c.model.getGroup().visible;
+            result.locked=!!c.model.getGroup().userData.editLocked;
+            result.missingSkin=c.missingSkin;result.missingCape=c.missingCape;
             if (!options.skin) {
                 delete result.skin;
                 delete result.cape;
@@ -139,6 +147,21 @@ export class IOPlugin {
             if (!options.pose) delete result.pose;
             return result;
         });
+        // Browsing the catalog must not add cache entries to the document.
+        const prune=(bundle,scope)=>{
+            if(!bundle)return bundle;
+            const roots=this.viewer.getPlugin('ItemsPlugin')?.items.filter(i=>(i.userData.resourceScope||null)===(scope||null)&&i.userData.resourceSpec)||[];
+            if(roots.some(i=>i.userData.resourceError))return bundle;
+            const used=new Set();for(const root of roots)root.traverse(o=>{for(const path of o.userData.dependencies||[])used.add(path);});
+            const vanilla=Object.fromEntries(Object.entries(bundle.vanilla||{}).filter(([path])=>used.has(path)));
+            const resources={},known=new Map();
+            const ref=id=>{const value=bundle.resources[id];if(!known.has(value)){const key='r'+known.size;known.set(value,key);resources[key]=value;}return known.get(value);};
+            const map=files=>Object.fromEntries(Object.entries(files||{}).sort(([a],[b])=>a.localeCompare(b)).map(([path,id])=>[path,ref(id)]));
+            const mapped=map(vanilla),packs=(bundle.packs||[]).map(p=>({...p,files:map(p.files)}));
+            return {...bundle,revision:Object.keys(vanilla).length?bundle.revision:undefined,vanilla:mapped,packs,resources};
+        };
+        state.resources=prune(state.resources);
+        if(state.resourceScopes)state.resourceScopes=Object.fromEntries(Object.entries(state.resourceScopes).map(([id,bundle])=>[id,prune(bundle,id)]));
         return poolProjectAssets(state);
     }
 
@@ -152,9 +175,14 @@ export class IOPlugin {
         const task=this.queue.then(()=>this.restoreProject(jsonData,options));
         this.queue=task.catch(()=>{});return task;
     }
-    async restoreProject(jsonData, {history=false}={}) {
-        const data = unpackProjectAssets(typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData);
+    validate(input){const result=validateProject(input);this.viewer.getPlugin('SceneToolsPlugin')?.validateHierarchy(result.data);return result;}
+    async restoreProject(jsonData, {history=false,repairable=false}={}) {
+        const {data} = this.validate(jsonData);
         if (!data || typeof data !== 'object') throw new Error('Nieprawidłowy projekt.');
+        if(repairable)for(const bundle of [data.resources,...Object.values(data.resourceScopes||{})].filter(Boolean)){
+            bundle.resources={...bundle.resources};
+            for(const [path,ref]of [...Object.entries(bundle.vanilla||{}),...(bundle.packs||[]).flatMap(p=>Object.entries(p.files||{}))])if(typeof bundle.resources[ref]!=='string')bundle.resources[ref]='missing-asset:'+path;
+        }
         const records = structuredClone(data.characters || [{
             name: 'Character',
             skin: data.core?.skin,
@@ -177,7 +205,7 @@ export class IOPlugin {
         const originalItems = [...(items?.items || [])], cameraBefore = this.viewer.cameraManager.getSettingsJSON();
         const settingsBefore = posing ? structuredClone(posing.settings) : null;
         const staged = [], stagedItems = [], ids = new Map();
-        const resourceBefore = items?.resources?.serialize();
+        const resourceBefore = items?.resources?.serialize(),scopesBefore=items?.serializeScopes(),modelsBefore=items?.models?.serialize();
         if (editor) editor.restoring = true;
         try {
             if(data.importedModels)items.models.restore(data.importedModels);
@@ -192,14 +220,20 @@ export class IOPlugin {
             if (posing && data.poseSettings) posing.configure(data.poseSettings);
             for (const record of records) {
                 if (!record || !['auto', 'steve', 'alex'].includes(record.modelType || 'auto')) throw new Error('Nieprawidłowa postać w projekcie.');
-                const c = await this.viewer.addCharacter({...record, id: undefined});
+                let c;
+                try {if(record.skin?.value?.startsWith('missing-asset:'))throw Error('Missing skin: '+record.skin.value);c=await this.viewer.addCharacter({...record,id:undefined});}
+                catch(error){if(!repairable)throw error;c=await this.viewer.addCharacter({...record,id:undefined,skin:null});c.missingSkin={source:record.skin,error:error.message};}
+                c.missingSkin=record.missingSkin||c.missingSkin;c.missingCape=record.missingCape;
                 staged.push(c);
                 ids.set(record.id, c.id);
                 c.lockScale = record.lockScale !== false;
                 if (record.cape?.value) {
+                    try {
+                    if(record.cape.value.startsWith('missing-asset:'))throw Error('Missing cape: '+record.cape.value);
                     if (record.cape.type === 'username') {
                         if (!await this.viewer.loadCapeByUsername(record.cape.value)) throw new Error('Cape could not be loaded');
                     } else await this.viewer.loadCape(record.cape.value);
+                    } catch(error){if(!repairable)throw error;c.missingCape={source:record.cape,error:error.message};}
                     if (record.pose?.cape) {
                         const part = c.model.parts.cape, t = record.pose.cape;
                         if (t.rot) part.rotation.fromArray(t.rot);
@@ -210,14 +244,16 @@ export class IOPlugin {
             }
             if (items) for (const item of data.items || []) {
                 if(!item.sourceUrl&&!item.resource&&!item.importedModel&&item.equipment?.armorSlot)continue;
-                if (!item.sourceUrl && !item.resource && !item.importedModel) throw new Error('Object has no source: '+item.name);
+                if (!item.sourceUrl && !item.resource && !item.importedModel && !repairable && !item.missingSource) throw new Error('Object has no source: '+item.name);
                 const owner = ids.get(item.characterId) || staged[0]?.id;
                 if(item.parentId && !owner)throw new Error('Missing attachment character: '+item.characterId);
-                const mesh = item.importedModel ? await items.addImportedModel(item.importedModel,item.name) : item.resource ? await items.addAsset(item.resource, item.name, true, item.resourceScope) : await items.addItem(item.sourceUrl, item.name);
+                let mesh;
+                try {if(item.missingSource)throw Error(item.missingSource.error);mesh=item.importedModel ? await items.addImportedModel(item.importedModel,item.name) : item.resource ? await items.addAsset(item.resource,item.name,true,item.resourceScope) : item.sourceUrl ? await items.addItem(item.sourceUrl,item.name) : null;if(!mesh)throw Error('Object has no source: '+item.name);}
+                catch(error){if(!repairable&&!item.missingSource)throw error;mesh=items.addMissingItem(item,error.message);}
                 stagedItems.push(mesh);
                 mesh.userData.importUuid=item.uuid;
                 if(stagedItems.length%32===0)await new Promise(resolve=>setTimeout(resolve,0));
-                mesh.visible=item.visible!==false;
+                mesh.visible=item.visible!==false;mesh.userData.editLocked=!!item.locked;
                 if (item.parentId) items.attachItem(mesh, item.parentId, owner);
                 mesh.position.fromArray(item.transform?.pos || [0, 0, 0]);
                 mesh.rotation.fromArray(item.transform?.rot || [0, 0, 0]);
@@ -226,6 +262,7 @@ export class IOPlugin {
             }
         } catch (error) {
             if (resourceBefore) items.resources.restore(resourceBefore);
+            if(scopesBefore)items.restoreScopes(scopesBefore);if(modelsBefore)items.models.restore(modelsBefore);
             for (const item of stagedItems) if (items.items.includes(item)) items.removeItem(item);
             for (const c of staged) this.viewer.removeCharacter(c.id);
             if(previous)this.viewer.selectCharacter(previous);
@@ -239,26 +276,32 @@ export class IOPlugin {
             for (const item of originalItems) if (items.items.includes(item)) items.removeItem(item);
             for(let i=0;i<staged.length;i++){
                 const c=staged[i], old=c.id, id=records[i].id||old;
-                c.id=id;c.model.getGroup().userData.characterId=id;c.model.getGroup().visible=records[i].visible!==false;
+                c.id=id;c.model.getGroup().userData.editLocked=!!records[i].locked;c.model.getGroup().userData.characterId=id;c.model.getGroup().visible=records[i].visible!==false;
                 for(const item of stagedItems)if(item.userData.characterId===old)item.userData.characterId=id;
             }
             stagedItems.forEach(mesh=>{if(mesh.userData.importUuid)mesh.uuid=mesh.userData.importUuid;delete mesh.userData.importUuid;});
             this.viewer.getPlugin('SceneToolsPlugin')?.restoreGroups(data);
             if(staged.length)this.viewer.selectCharacter(data.activeCharacterId && this.viewer.getCharacter(data.activeCharacterId) ? data.activeCharacterId : staged[0].id);
             if (data.core?.config) this.viewer.updateConfig(data.core.config);
-            if (data.core?.camera) this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
+            if (data.core?.camera && !history) this.viewer.cameraManager.loadSettingsJSON(data.core.camera);
+            this.viewer.projectName=data.documentName||data.meta?.name||'Untitled';
+            if(history)this.viewer.cameraManager.loadSettingsJSON(cameraBefore);
+            this.viewer.savedCameras=structuredClone(data.cameras||[]);
+            this.viewer.renderSettings={...DEFAULT_RENDER_SETTINGS,...data.renderSettings};
             if (data.environment) this.viewer.setEnvironment({shadows:false, shadowStrength:0.65, shadowSoftness:1, sunAzimuth:45, sunElevation:55, ...data.environment});
             if (data.effects?.backlight) this.viewer.getPlugin('EffectsPlugin')?.updateConfig(data.effects.backlight);
             if (posing) {
-                if (Array.isArray(data.poseLibrary)) posing.library = data.poseLibrary.slice(0, 100);
+                if(!history)this.viewer.projectPoseLibrary=structuredClone(data.poseLibrary||[]);
                 this.viewer.emit('pose:library');
             }
             editor?.deselect();
             if (editor && !history) {
+                editor.history.clear?.();
                 editor.history.undoStack = [];
                 editor.history.redoStack = [];
             }
             this.viewer.emit('characters:change');
+            this.viewer.emit('project:restored');
             this.viewer.requestRender();
         } finally {
             if (editor) editor.restoring = false;

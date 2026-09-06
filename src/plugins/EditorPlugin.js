@@ -1,3 +1,4 @@
+import {containsEditLock} from '../utils/EditLocks.js';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { HistoryManager } from '../managers/HistoryManager.js';
@@ -113,7 +114,7 @@ export class EditorPlugin {
     // Decide which set of rings owns the gesture before Three.js handles it.
     // Small bone rings take priority where their hit areas overlap the outer gizmo.
     routePointer(event) {
-        if(this.restoring)return;
+        if(this.restoring||this.selectedObjects.some(containsEditLock))return;
         if (this.viewer.getPlugin('PosePlugin')?.ikControl) return;
         if (this.transformControl.dragging || this.boneControl.dragging || this.mode === 'view') return;
         this.syncBoneHandle();
