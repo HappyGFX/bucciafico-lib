@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {createVoxelLayer} from '../utils/Voxelizer.js';
 import {applySkinUVs} from '../utils/SkinUtils.js';
-import {createGlowMaterial, updateWorldGlow} from '../materials/GlowMaterial.js';
+import {createGlowMaterial, createSurfaceGlowMaterial, updateWorldGlow} from '../materials/GlowMaterial.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {JointBinding, JOINTS} from "./BoneRig.js";
 
@@ -57,7 +57,7 @@ export class SkinModel {
             this.bodyMeshes.push(mesh);
             const shells = [];
             for (let i = 0; i < this.LAYERS_COUNT; i++) {
-                const glowMat = createGlowMaterial(size.h, texture);
+                const glowMat = i === 0 ? createSurfaceGlowMaterial(geometry, size.h, texture) : createGlowMaterial(size.h, texture);
                 const shell = new THREE.Mesh(geometry, glowMat);
                 shell.userData = {layerIndex: i, isGlow: true, glowMat, skinPart: name, skinLayer: layer};
                 meshGroup.add(shell);
@@ -266,12 +266,12 @@ export class SkinModel {
         const shellGeo = geo.clone();
 
         for (let i = 0; i < this.LAYERS_COUNT; i++) {
-            const glowMat = createGlowMaterial(size.h);
+            const glowMat = i === 0 ? createSurfaceGlowMaterial(shellGeo, size.h, texture) : createGlowMaterial(size.h, texture);
 
             glowMat.uniforms.thickness.value = 0;
             glowMat.uniforms.opacity.value = 0;
             glowMat.polygonOffset = true;
-            glowMat.polygonOffsetFactor = i * 0.1;
+            if (i > 0) glowMat.polygonOffsetFactor = i * 0.1;
 
             const layerMesh = new THREE.Mesh(shellGeo, glowMat);
 
@@ -353,7 +353,7 @@ export class SkinModel {
     }
 
     /**
-     * Updates thickness creating a solid volume effect.
+     * Updates the width of the layered rim; opacity falls off towards its outside.
      * @param {number} v - Base thickness value.
      */
     updateBorderThickness(v) {
@@ -364,6 +364,7 @@ export class SkinModel {
                 const progress = (i + 1) / this.LAYERS_COUNT;
 
                 mesh.userData.glowMat.uniforms.thickness.value = maxThickness * progress;
+                if (mesh.userData.glowMat.uniforms.rimWidth) mesh.userData.glowMat.uniforms.rimWidth.value = v * 0.22;
             });
         });
     }
@@ -374,13 +375,16 @@ export class SkinModel {
         });
     }
 
-    setGlowEffect(en) {
+    setGlowEffect(en, strength = 0.6) {
+        const intensity = 0.7 * (1 - Math.exp(-2 * Math.max(0, strength)));
         this.glowMeshes.forEach(layers => {
             layers.forEach((mesh, i) => {
                 if (!en) {
                     mesh.userData.glowMat.uniforms.opacity.value = 0.0;
                 } else {
-                    mesh.userData.glowMat.uniforms.opacity.value = 1.0 / (this.LAYERS_COUNT * 0.6);
+                    const progress = (i + 1) / this.LAYERS_COUNT;
+                    mesh.userData.glowMat.uniforms.opacity.value = i === 0 ? intensity
+                        : intensity / this.LAYERS_COUNT * Math.exp(-3 * progress);
                 }
             });
         });

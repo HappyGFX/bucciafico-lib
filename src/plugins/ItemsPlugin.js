@@ -4,7 +4,7 @@ import {EquipmentMethods} from './EquipmentMethods.js';
 import * as THREE from 'three';
 import {ItemFactory} from '../objects/ItemFactory.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
-import {createGlowMaterial, updateWorldGlow} from "../materials/GlowMaterial.js";
+import {createGlowMaterial, createSurfaceGlowMaterial, updateWorldGlow} from "../materials/GlowMaterial.js";
 
 /**
  * Plugin responsible for managing 3D Items (Swords, Blocks).
@@ -66,13 +66,15 @@ export class ItemsPlugin {
         const shellGeo = gradient ? mesh.geometry : mesh.geometry.clone();
 
         for (let i = 0; i < this.LAYERS_COUNT; i++) {
-            const glowMat = createGlowMaterial(itemHeight, mesh.material.map || null, gradient || {minY: mesh.geometry.boundingBox.min.y});
+            const glowMat = i === 0
+                ? createSurfaceGlowMaterial(shellGeo, itemHeight, mesh.material.map || null, gradient || {minY: mesh.geometry.boundingBox.min.y})
+                : createGlowMaterial(itemHeight, mesh.material.map || null, gradient || {minY: mesh.geometry.boundingBox.min.y});
 
             glowMat.uniforms.thickness.value = 0;
             glowMat.uniforms.opacity.value = 0;
 
             glowMat.polygonOffset = true;
-            glowMat.polygonOffsetFactor = i * 0.1;
+            if (i > 0) glowMat.polygonOffsetFactor = i * 0.1;
 
             const layerMesh = new THREE.Mesh(shellGeo, glowMat);
             layerMesh.userData.isGlowLayer = true;
@@ -202,24 +204,27 @@ export class ItemsPlugin {
         }
         if (!item.userData.glowLayers) return;
 
-        const maxThickness = (config.thickness || 4) * 0.05;
-        const heightLimit = config.height !== undefined ? config.height : 0.5;
+        const maxThickness = (config.thickness ?? 2) * 0.05;
+        const heightLimit = config.height !== undefined ? config.height : 0.3;
         const enabled = config.enabled;
 
         item.userData.glowLayers.forEach((layer, i) => {
             layer.visible = !!enabled;
             const mat = layer.userData.glowMat;
             if (!mat) return;
+            mat.uniforms.glowGain.value = i === 0 ? (config.innerGlow ?? 1) : (config.outerGlow ?? 1);
 
             const progress = (i + 1) / this.LAYERS_COUNT;
             mat.uniforms.thickness.value = maxThickness * progress;
+            if (mat.uniforms.rimWidth) mat.uniforms.rimWidth.value = (config.thickness ?? 2) * 0.22;
 
             mat.uniforms.gradientLimit.value = heightLimit;
 
             if (!enabled) {
                 mat.uniforms.opacity.value = 0.0;
             } else {
-                const baseOpacity = 1.2 / this.LAYERS_COUNT;
+                const intensity = 0.7 * (1 - Math.exp(-2 * Math.max(0, config.strength ?? 1)));
+                const baseOpacity = i === 0 ? intensity : intensity / this.LAYERS_COUNT * Math.exp(-3 * progress);
                 mat.uniforms.opacity.value = baseOpacity;
             }
         });

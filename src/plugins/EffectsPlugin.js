@@ -1,3 +1,6 @@
+import {renderPlan} from '../utils/RenderOutput.js';
+import {DEFAULT_GLOW_SETTINGS} from '../utils/GlowConfig.js';
+import {DEFAULT_AO, DEFAULT_DOF, normalizePostEffect} from '../utils/PostEffectsConfig.js';
 import * as THREE from 'three';
 import {PostProcessingManager} from '../managers/PostProcessingManager.js';
 
@@ -8,13 +11,7 @@ import {PostProcessingManager} from '../managers/PostProcessingManager.js';
 export class EffectsPlugin {
     constructor() {
         this.name = 'EffectsPlugin';
-        this.state = {
-            enabled: false,
-            strength: 0,
-            radius: 0,
-            height: 0.5,
-            thickness: 4
-        };
+        this.state = {...DEFAULT_GLOW_SETTINGS, ao:{...DEFAULT_AO}, dof:{...DEFAULT_DOF}};
     }
 
     init(viewer) {
@@ -29,10 +26,16 @@ export class EffectsPlugin {
 
     /**
      * Updates effect parameters.
-     * @param {Object} config - { enabled, strength, radius, height, thickness }
+     * @param {Object} config - { enabled, strength, radius, height, thickness, innerGlow, outerGlow }
      */
     updateConfig(config) {
-        this.state = {...this.state, ...config};
+        this.state = {...this.state, ...config,
+            ao:normalizePostEffect('ao', this.state.ao, config.ao),
+            dof:normalizePostEffect('dof', this.state.dof, config.dof)};
+        for (const key of ['innerGlow', 'outerGlow']) {
+            this.state[key] = Number.isFinite(this.state[key])
+                ? THREE.MathUtils.clamp(this.state[key], 0, 2) : DEFAULT_GLOW_SETTINGS[key];
+        }
 
         this._applyToScene();
     }
@@ -54,7 +57,7 @@ export class EffectsPlugin {
         skin.updateBones();
 
         for (const {model} of this.viewer.characters) {
-            model.setGlowEffect(config.enabled);
+            model.setGlowEffect(config.enabled, config.strength);
             model.updateBorderThickness(config.thickness);
             model.updateGlowHeight(config.height);
         }
@@ -64,7 +67,8 @@ export class EffectsPlugin {
             itemsPlugin.updateAllGlow(config);
         }
 
-        this.composer.setBloom(config.enabled, config.strength, config.radius, 0.85);
+        this.composer.setBloom(config.enabled, config.strength, config.radius, 0.1, config.innerGlow, config.outerGlow);
+        this.composer.depthEffects.configure(config.ao, config.dof);
         this.viewer.requestRender();
     }
 
@@ -89,6 +93,8 @@ export class EffectsPlugin {
         const items = itemsPlugin ? itemsPlugin.items : [];
         itemsPlugin?.updateWorldGlow();
         this.viewer.sceneSetup.updateShadows();
+        this.composer.depthEffects.render(this.viewer.renderer,
+            [...this.viewer.characters.map(c=>c.model.playerGroup), ...items], this.viewer.cameraManager.controls.target);
         const equipmentMaterials = new Map();
 
         this.composer.renderSelective(
@@ -126,64 +132,43 @@ export class EffectsPlugin {
      * Returns the current configuration state.
      */
     getConfig() {
-        return {...this.state};
+        return {...this.state, ao:{...this.state.ao}, dof:{...this.state.dof}};
     }
 
     /**
      * Generates a transparent PNG screenshot.
      * Temporarily resizes renderer if width/height are provided.
      */
-    captureScreenshot(width, height) {
-        const renderer = this.viewer.renderer;
-        const camera = this.viewer.cameraManager.camera;
-
-        const originalSize = new THREE.Vector2();
-        renderer.getSize(originalSize);
-        const originalAspect = camera.aspect;
-
-        if (width && height) {
-            renderer.setSize(width, height);
-            camera.aspect = width / height;
-            camera.updateProjectionMatrix();
-            this.composer.resize(width, height);
+    captureScreenshot(width,height,options={}) {
+        return this.captureCanvas(width,height,options).toDataURL('image/png');
+    }
+    captureCanvas(width,height,options={}) {
+        const viewer=this.viewer,renderer=viewer.renderer,camera=viewer.cameraManager.camera;
+        const size=renderer.getSize(new THREE.Vector2()),ratio=renderer.getPixelRatio();
+        width=width||size.x;height=height||size.y;
+        const plan=renderPlan(renderer,width,height,options.quality||'standard');
+        const aspect=camera.aspect,grid=viewer.config.showGrid,bg=viewer.scene.background,selection=this.composer.outlinePass.selectedObjects;
+        const color=renderer.getClearColor(new THREE.Color()),alpha=renderer.getClearAlpha();
+        const targets=[this.composer.bloomComposer,this.composer.finalComposer].flatMap(c=>[c.renderTarget1,c.renderTarget2]);
+        const samples=targets.map(t=>t.samples);
+        try {
+            targets.forEach(t=>{if(t.samples!==plan.samples){t.samples=plan.samples;t.dispose();}});
+            renderer.setPixelRatio(1);renderer.setSize(plan.width,plan.height,false);
+            camera.aspect=width/height;camera.updateProjectionMatrix();this.composer.resize(plan.width,plan.height);
+            this.composer.setSelected(null);viewer.config.showGrid=false;viewer.sceneSetup.setGridVisible(false);
+            viewer.scene.background=options.background==='solid'?new THREE.Color(options.backgroundColor||'#141417'):null;
+            renderer.setClearColor(options.backgroundColor||'#141417',options.background==='solid'?1:0);
+            this.render();
+            const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+            const context=canvas.getContext('2d');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';
+            context.drawImage(renderer.domElement,0,0,width,height);return canvas;
+        } finally {
+            viewer.scene.background=bg;renderer.setClearColor(color,alpha);viewer.config.showGrid=grid;viewer.sceneSetup.setGridVisible(grid);
+            this.composer.outlinePass.selectedObjects=selection;
+            targets.forEach((t,i)=>{if(t.samples!==samples[i]){t.samples=samples[i];t.dispose();}});
+            renderer.setPixelRatio(ratio);renderer.setSize(size.x,size.y,false);camera.aspect=aspect;camera.updateProjectionMatrix();this.composer.resize(size.x,size.y);
+            viewer.cameraManager.update();viewer.requestRender();
         }
-
-        const wasGridEnabled = this.viewer.config.showGrid;
-        const prevBg = this.viewer.scene.background;
-        const prevSel = this.composer.outlinePass.selectedObjects;
-        const prevClearColor = new THREE.Color();
-        renderer.getClearColor(prevClearColor);
-        const prevClearAlpha = renderer.getClearAlpha();
-
-        this.composer.setSelected(null);
-
-        this.viewer.config.showGrid = false;
-        this.viewer.sceneSetup.setGridVisible(false);
-
-        this.viewer.scene.background = null;
-        renderer.setClearColor(0x000000, 0);
-
-        this.render();
-
-        const dataUrl = renderer.domElement.toDataURL("image/png");
-
-        this.viewer.scene.background = prevBg;
-        renderer.setClearColor(prevClearColor, prevClearAlpha);
-
-        this.viewer.config.showGrid = wasGridEnabled;
-        this.viewer.sceneSetup.setGridVisible(wasGridEnabled);
-
-        this.composer.outlinePass.selectedObjects = prevSel;
-
-        if (width && height) {
-            renderer.setSize(originalSize.x, originalSize.y);
-            camera.aspect = originalAspect;
-            camera.updateProjectionMatrix();
-            this.composer.resize(originalSize.x, originalSize.y);
-        }
-
-        this.viewer.cameraManager.update();
-        return dataUrl;
     }
 
     dispose() {

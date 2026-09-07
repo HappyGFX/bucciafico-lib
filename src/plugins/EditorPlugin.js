@@ -29,7 +29,7 @@ export class EditorPlugin {
 
         this.setupGizmo();
         this.bindEvents();
-        this.unsubscribeSkin = viewer.on('skin:loaded', () => this.deselect());
+        this.unsubscribeSkin = viewer.on('skin:loaded', () => this.syncBoneHandle());
         this.unsubscribeTransform = viewer.on('transform:change', () => this.syncBoneHandle());
     }
 

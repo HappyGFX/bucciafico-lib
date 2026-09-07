@@ -94,6 +94,13 @@ export class SceneSetup {
         camera.near = Math.max(0.1,-lightBounds.max.z-pad);
         camera.far = -lightBounds.min.z+pad;
         camera.updateProjectionMatrix();
+        // Bias uses the fitted map's world-space texel footprint. A fixed offset
+        // fails once larger scenes or a wider PCF kernel sample the same face.
+        const shadow = this.dirLightMain.shadow;
+        const texel = Math.max((camera.right-camera.left)/shadow.mapSize.x,
+            (camera.top-camera.bottom)/shadow.mapSize.y);
+        shadow.normalBias = Math.max(0.025, texel*(1+shadow.radius)*1.5);
+        shadow.bias = -Math.max(0.00001, texel*0.05/(camera.far-camera.near));
         this.renderer.shadowMap.needsUpdate = true;
     }
 

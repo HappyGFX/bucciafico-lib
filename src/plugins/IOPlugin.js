@@ -120,6 +120,7 @@ export class IOPlugin {
         state.activeCharacterId = this.viewer.activeCharacter?.id || null;
         state.documentName=this.viewer.projectName||'Untitled';
         state.cameras=structuredClone(this.viewer.savedCameras||[]);
+        state.variants=structuredClone(this.viewer.sceneVariants||[]);
         state.renderSettings={...DEFAULT_RENDER_SETTINGS,...this.viewer.renderSettings};
         state.groups = this.viewer.getPlugin('SceneToolsPlugin')?.serializeGroups() || [];
         state.sceneTools = this.viewer.getPlugin('SceneToolsPlugin')?.settings;
@@ -176,7 +177,7 @@ export class IOPlugin {
         this.queue=task.catch(()=>{});return task;
     }
     validate(input){const result=validateProject(input);this.viewer.getPlugin('SceneToolsPlugin')?.validateHierarchy(result.data);return result;}
-    async restoreProject(jsonData, {history=false,repairable=false}={}) {
+    async restoreProject(jsonData, {history=false,repairable=false,preserveHistory=false}={}) {
         const {data} = this.validate(jsonData);
         if (!data || typeof data !== 'object') throw new Error('Nieprawidłowy projekt.');
         if(repairable)for(const bundle of [data.resources,...Object.values(data.resourceScopes||{})].filter(Boolean)){
@@ -287,15 +288,20 @@ export class IOPlugin {
             this.viewer.projectName=data.documentName||data.meta?.name||'Untitled';
             if(history)this.viewer.cameraManager.loadSettingsJSON(cameraBefore);
             this.viewer.savedCameras=structuredClone(data.cameras||[]);
+            this.viewer.sceneVariants=structuredClone(data.variants||[]);
             this.viewer.renderSettings={...DEFAULT_RENDER_SETTINGS,...data.renderSettings};
             if (data.environment) this.viewer.setEnvironment({shadows:false, shadowStrength:0.65, shadowSoftness:1, sunAzimuth:45, sunElevation:55, ...data.environment});
-            if (data.effects?.backlight) this.viewer.getPlugin('EffectsPlugin')?.updateConfig(data.effects.backlight);
+            if (data.effects?.backlight) {
+                const {DEFAULT_AO,DEFAULT_DOF}=await import('../utils/PostEffectsConfig.js');
+                this.viewer.getPlugin('EffectsPlugin')?.updateConfig({innerGlow:1, outerGlow:1, ...data.effects.backlight,
+                    ao:{...DEFAULT_AO,...data.effects.backlight.ao},dof:{...DEFAULT_DOF,...data.effects.backlight.dof}});
+            }
             if (posing) {
                 if(!history)this.viewer.projectPoseLibrary=structuredClone(data.poseLibrary||[]);
                 this.viewer.emit('pose:library');
             }
             editor?.deselect();
-            if (editor && !history) {
+            if (editor && !history && !preserveHistory) {
                 editor.history.clear?.();
                 editor.history.undoStack = [];
                 editor.history.redoStack = [];
