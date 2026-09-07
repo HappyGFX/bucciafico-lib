@@ -72,7 +72,7 @@ export class SceneSetup {
         this.scene.updateMatrixWorld(true);
         const bounds = new THREE.Box3();
         this.scene.traverseVisible(mesh => {
-            if (!mesh.isMesh || !mesh.geometry || mesh.userData.isGlow || mesh.userData.isGlowLayer) return;
+            if (!mesh.isMesh || !mesh.geometry || mesh.userData.isGlow || mesh.userData.isGlowLayer || mesh.userData.isNametag) return;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             // Positions may have changed through elbow/knee/torso deformation.

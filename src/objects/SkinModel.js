@@ -4,6 +4,7 @@ import {applySkinUVs} from '../utils/SkinUtils.js';
 import {createGlowMaterial, createSurfaceGlowMaterial, updateWorldGlow} from '../materials/GlowMaterial.js';
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {JointBinding, JOINTS} from "./BoneRig.js";
+import {CapeBending,createCapeGeometry,normalizeCapeBending} from './CapeBending.js';
 
 /**
  * Represents the Minecraft Character Model (Steve/Alex).
@@ -15,6 +16,8 @@ export class SkinModel {
         this.parts = {};
         this.visibility = {base: true, outer: true, parts: {}, outerParts: {}};
         this.jointBindings = [];
+        this.capeBending = normalizeCapeBending();
+        this.capeBinding = null;
         this.glowMeshes = [];
         this.bodyMeshes = [];
         this.defaultPositions = {};
@@ -107,6 +110,7 @@ export class SkinModel {
         this.glowMeshes = [];
         this.bodyMeshes = [];
         this.defaultPositions = {};
+        this.capeBinding = null;
 
         this.jointBindings = [];
         const armW = isSlim ? 3 : 4;
@@ -207,6 +211,7 @@ export class SkinModel {
      */
     setCape(texture) {
         if (!this.playerGroup) return;
+        this.capeBinding = null;
 
         let prevTransform = null;
 
@@ -244,8 +249,7 @@ export class SkinModel {
 
         this.defaultPositions['cape'] = pivotPos.clone();
 
-        const geo = new THREE.BoxGeometry(size.w, size.h, size.d);
-        applySkinUVs(geo, 0, 0, 10, 16, 1, 64, 32);
+        const geo = createCapeGeometry();
 
         const mat = new THREE.MeshStandardMaterial({
             map: texture,
@@ -263,7 +267,7 @@ export class SkinModel {
         this.bodyMeshes.push(mainMesh);
 
         const capeLayers = [];
-        const shellGeo = geo.clone();
+        const shellGeo = geo;
 
         for (let i = 0; i < this.LAYERS_COUNT; i++) {
             const glowMat = i === 0 ? createSurfaceGlowMaterial(shellGeo, size.h, texture) : createGlowMaterial(size.h, texture);
@@ -297,6 +301,14 @@ export class SkinModel {
 
         (this.upperBody || this.playerGroup).add(pivotGroup);
         this.parts['cape'] = pivotGroup;
+        this.capeBinding = new CapeBending(geo);
+        this.capeBinding.update(this.capeBending);
+    }
+
+    setCapeBending(patch) {
+        this.capeBending = normalizeCapeBending(this.capeBending,patch);
+        this.capeBinding?.update(this.capeBending);
+        this.updateBones();
     }
 
     getGroup() {
@@ -494,6 +506,7 @@ export class SkinModel {
     }
 
     dispose() {
+        this.capeBinding = null;
         if (this.playerGroup) {
             if (this.playerGroup.parent) {
                 this.playerGroup.parent.remove(this.playerGroup);

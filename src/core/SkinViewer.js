@@ -334,6 +334,7 @@ export class SkinViewer {
         if (effects) {
             effects.render();
         } else {
+            this.updateNametags();
             this.sceneSetup.updateShadows();
             this.renderer.clear();
             this.renderer.render(this.scene, this.cameraManager.camera);
@@ -356,7 +357,7 @@ export class SkinViewer {
         this.plugins.clear();
 
         if (this.skinModel) {
-            this.characters.forEach(c=>{c.abort?.abort();c.model.dispose();});
+            this.characters.forEach(c=>{c.abort?.abort();c.nametagObject?.dispose();c.model.dispose();});
         }
 
         this.sceneSetup.dispose();

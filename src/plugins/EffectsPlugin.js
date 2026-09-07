@@ -90,7 +90,7 @@ export class EffectsPlugin {
         const skin = this.viewer.skinModel;
         this.viewer.characters.forEach(c => c.model.updateBones());
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
-        const items = itemsPlugin ? itemsPlugin.items : [];
+        const items = [...(itemsPlugin?.items||[]), ...this.viewer.updateNametags()];
         itemsPlugin?.updateWorldGlow();
         this.viewer.sceneSetup.updateShadows();
         this.composer.depthEffects.render(this.viewer.renderer,
