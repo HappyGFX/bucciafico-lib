@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import {createAntialiasedComposer} from '../utils/Antialiasing.js';
+import {RenderPass} from 'three/examples/jsm/postprocessing/RenderPass.js';
+import {ShaderPass} from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import {UnrealBloomPass} from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/examples/jsm/postprocessing/OutputPass.js';
+import {OutlinePass} from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import {DepthEffects} from './DepthEffects.js';
 
 /**
  * Handles the post-processing pipeline (Bloom, Outline, Color Correction).
@@ -13,6 +14,8 @@ export class PostProcessingManager {
     constructor(renderer, scene, camera, width, height) {
         this.scene = scene;
         this.renderer = renderer;
+        this.depthEffects = new DepthEffects(scene, camera);
+        this.depthEffects.setSize(width * renderer.getPixelRatio(), height * renderer.getPixelRatio());
 
         this.INTERNAL_HEIGHT = 1080;
 
@@ -21,18 +24,22 @@ export class PostProcessingManager {
         const virtualH = this.INTERNAL_HEIGHT;
 
         // 1. BLOOM COMPOSER (Renders glow map)
-        this.bloomComposer = new EffectComposer(renderer);
+        this.bloomComposer = createAntialiasedComposer(renderer, width, height);
         this.bloomComposer.renderToScreen = false;
+        // Fixed working resolution keeps the halo width stable across DPR and exports.
+        this.bloomComposer.setPixelRatio(1);
         this.bloomComposer.setSize(virtualW, virtualH);
-        this.bloomComposer.addPass(new RenderPass(scene, camera));
+        this.bloomComposer.addPass(new RenderPass(scene, camera, null, null, 0));
 
         this.bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 1.5, 0.4, 0.85);
         this.bloomComposer.addPass(this.bloomPass);
 
         // 2. FINAL COMPOSER
-        this.finalComposer = new EffectComposer(renderer);
+        this.finalComposer = createAntialiasedComposer(renderer, width, height);
         this.finalComposer.setSize(width, height);
-        this.finalComposer.addPass(new RenderPass(scene, camera));
+        this.basePass = new RenderPass(scene, camera);
+        this.finalComposer.addPass(this.basePass);
+        this.finalComposer.addPass(this.depthEffects.aoPass);
 
         // 3. OUTLINE PASS (Selection highlight)
         this.outlinePass = new OutlinePass(new THREE.Vector2(width, height), scene, camera);
@@ -44,8 +51,8 @@ export class PostProcessingManager {
         // 4. MIX SHADER (Combines Base + Bloom preserving Alpha)
         const MixShader = {
             uniforms: {
-                tDiffuse: { value: null },
-                bloomTexture: { value: null }
+                tDiffuse: {value: null},
+                bloomTexture: {value: null}
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -57,25 +64,32 @@ export class PostProcessingManager {
             fragmentShader: `
                 uniform sampler2D tDiffuse;
                 uniform sampler2D bloomTexture;
+                uniform vec3 backgroundColor;
+                uniform float backgroundOpacity;
+                uniform float innerGlow;
+                uniform float outerGlow;
                 varying vec2 vUv;
                 
                 void main() {
                     vec4 baseColor = texture2D(tDiffuse, vUv);
                     vec4 bloomColor = texture2D(bloomTexture, vUv);
                     
-                    vec3 bloomRGB = bloomColor.rgb;
-                    float brightness = max(bloomRGB.r, max(bloomRGB.g, bloomRGB.b));
-                    
-                    if (brightness < 0.15) {
-                        bloomRGB = vec3(0.0);
-                        brightness = 0.0;
-                    } else {
-                        bloomRGB = (bloomRGB - 0.15) * 1.2; 
-                    }
-
-                    vec3 finalColor = baseColor.rgb + (bloomRGB * 2.0);
-                    float glowAlpha = clamp(brightness, 0.0, 1.0);
-                    float finalAlpha = max(baseColor.a, glowAlpha);
+                    // Keep the full blur tail. Thresholding here turns bloom into
+                    // a hard contour; the bright-pass already selects its source.
+                    vec3 bloomRGB = max(bloomColor.rgb, vec3(0.0));
+                    // Most scattered light stays on the model. Only a faint halo
+                    // crosses the silhouette; it must not become a white backdrop.
+                    float surface = clamp(baseColor.a, 0.0, 1.0);
+                    bloomRGB *= mix(0.04 * outerGlow, 0.6 * innerGlow, surface);
+                    vec3 finalColor = baseColor.rgb + bloomRGB;
+                    // The canvas is premultiplied in display space. Linear bloom
+                    // luminance as alpha would erase its soft halo in exported PNGs.
+                    vec3 displayColor = sRGBTransferOETF(vec4(finalColor, 1.0)).rgb;
+                    float coverage = clamp(max(displayColor.r, max(displayColor.g, displayColor.b)), 0.0, 1.0);
+                    float hasBloom = step(0.000001, max(bloomRGB.r, max(bloomRGB.g, bloomRGB.b)));
+                    float finalAlpha = mix(baseColor.a, max(baseColor.a, coverage), hasBloom);
+                    finalColor += backgroundColor * backgroundOpacity * (1.0 - baseColor.a);
+                    finalAlpha = mix(finalAlpha, 1.0, backgroundOpacity);
 
                     gl_FragColor = vec4(finalColor, finalAlpha);
                 }
@@ -83,14 +97,23 @@ export class PostProcessingManager {
         };
 
         this.mixPass = new ShaderPass(MixShader);
+        this.mixPass.uniforms.backgroundColor = {value: new THREE.Color(0)};
+        this.mixPass.uniforms.backgroundOpacity = {value: 0};
+        this.mixPass.uniforms.innerGlow = {value: 1};
+        this.mixPass.uniforms.outerGlow = {value: 1};
         this.mixPass.needsSwap = true;
         this.finalComposer.addPass(this.mixPass);
 
         // 5. OUTPUT PASS (sRGB correction)
         this.finalComposer.addPass(new OutputPass());
+        this.finalComposer.addPass(this.depthEffects.dofPass);
     }
 
     resize(width, height) {
+        const pixelRatio = this.renderer.getPixelRatio();
+        this.bloomComposer.setPixelRatio(1);
+        this.finalComposer.setPixelRatio(pixelRatio);
+        this.depthEffects.setSize(width * pixelRatio, height * pixelRatio);
         const ratio = width / height;
 
         const virtualH = this.INTERNAL_HEIGHT;
@@ -99,7 +122,7 @@ export class PostProcessingManager {
         this.bloomComposer.setSize(virtualW, virtualH);
         this.finalComposer.setSize(width, height);
         this.bloomPass.resolution.set(virtualW, virtualH);
-        this.outlinePass.setSize(width, height);
+        // Composer also resizes selection buffers at the actual pixel ratio.
     }
 
     /**
@@ -109,30 +132,61 @@ export class PostProcessingManager {
      */
     renderSelective(prepareBloomCb, restoreSceneCb) {
         const prevBg = this.scene.background;
-        this.scene.background = new THREE.Color(0x000000);
+        this.scene.background = null;
         this.outlinePass.enabled = false;
 
-        prepareBloomCb();
-        this.bloomComposer.render();
-        restoreSceneCb();
-
-        this.scene.background = prevBg;
+        // Both controls use the same unattenuated light source. Turning off the
+        // surface highlight must not also turn off the exterior bloom.
+        const gains = new Map();
+        this.scene.traverse(mesh => {
+            const gain = mesh.material?.uniforms?.glowGain;
+            if (gain) {gains.set(gain, gain.value);gain.value = 1;}
+        });
+        try {prepareBloomCb();this.bloomComposer.render();}
+        finally {
+            gains.forEach((value, gain) => {gain.value = value;});
+            restoreSceneCb();this.scene.background=prevBg;this.outlinePass.enabled=true;
+        }
         this.outlinePass.enabled = true;
-        this.mixPass.uniforms.bloomTexture.value = this.bloomComposer.readBuffer.texture;
-        this.finalComposer.render();
+        // UnrealBloomPass also adds its input to readBuffer. Mixing that buffer
+        // doubles the sharp shell already present in the base render.
+        this.mixPass.uniforms.bloomTexture.value = this.bloomPass.renderTargetsHorizontal[0].texture;
+        // Add solid backgrounds after the light split so geometry alpha remains
+        // an exact mask at the final resolution, including antialiased edges.
+        const separateBackground = !prevBg || prevBg.isColor;
+        this.mixPass.uniforms.backgroundOpacity.value = prevBg?.isColor ? 1 : 0;
+        if (prevBg?.isColor) this.mixPass.uniforms.backgroundColor.value.copy(prevBg);
+        if (separateBackground) {this.scene.background = null;this.basePass.clearAlpha = 0;}
+        try {this.finalComposer.render();}
+        finally {this.scene.background = prevBg;this.basePass.clearAlpha = null;}
     }
 
     setSelected(obj) {
         this.outlinePass.selectedObjects = obj ? [obj] : [];
     }
 
-    setBloom(en, str, rad, thr) {
+    setBloom(en, str, rad, thr, innerGlow = 1, outerGlow = 1) {
+        this.mixPass.uniforms.innerGlow.value = innerGlow;
+        this.mixPass.uniforms.outerGlow.value = outerGlow;
+        this.scene.traverse(mesh => {
+            const material = mesh.material;
+            if (material?.uniforms?.glowGain) {
+                material.uniforms.glowGain.value = material.defines?.SURFACE_GLOW ? innerGlow : outerGlow;
+            }
+        });
         this.bloomPass.strength = en ? Number(str) : 0;
-        this.bloomPass.radius = Number(rad);
+        // Favour the close halo. UnrealBloomPass's default radius interpolation
+        // gives its largest mip too much weight, washing out the whole portrait.
+        const radius = THREE.MathUtils.clamp(Number(rad) / 2, 0, 1);
+        this.bloomPass.radius = 0;
+        this.bloomPass.bloomFactors = [1, 0.5 + radius * 0.3, 0.12 + radius * 0.2,
+            0.01 + radius * 0.1, 0.002 + radius * 0.025];
+        this.bloomPass.compositeMaterial.uniforms.bloomFactors.value = this.bloomPass.bloomFactors;
         this.bloomPass.threshold = Number(thr);
     }
 
     dispose() {
+        this.depthEffects.dispose();
         if (this.bloomComposer) {
             this.bloomComposer.renderTarget1.dispose();
             this.bloomComposer.renderTarget2.dispose();

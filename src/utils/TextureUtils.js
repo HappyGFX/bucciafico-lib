@@ -12,7 +12,7 @@ export function createPlaceholderTexture() {
     const ctx = canvas.getContext('2d');
 
     ctx.fillStyle = '#3c3c3c';
-    ctx.fillRect(0, 0, 64, 64);
+    for(const [x,y,w,h] of [[0,0,32,16],[16,16,24,16],[40,16,16,16],[0,16,16,16],[16,48,16,16],[32,48,16,16]])ctx.fillRect(x,y,w,h);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.magFilter = THREE.NearestFilter;
