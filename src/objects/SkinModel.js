@@ -5,6 +5,7 @@ import {createGlowMaterial, createSurfaceGlowMaterial, updateWorldGlow} from '..
 import {disposeObjectTree} from "../utils/ThreeUtils.js";
 import {JointBinding, JOINTS} from "./BoneRig.js";
 import {CapeBending,createCapeGeometry,normalizeCapeBending} from './CapeBending.js';
+import {normalizeCapeTexture} from '../utils/CapeTexture.js';
 
 /**
  * Represents the Minecraft Character Model (Steve/Alex).
@@ -61,6 +62,7 @@ export class SkinModel {
             const shells = [];
             for (let i = 0; i < this.LAYERS_COUNT; i++) {
                 const glowMat = i === 0 ? createSurfaceGlowMaterial(geometry, size.h, texture) : createGlowMaterial(size.h, texture);
+                glowMat.visible=false;
                 const shell = new THREE.Mesh(geometry, glowMat);
                 shell.userData = {layerIndex: i, isGlow: true, glowMat, skinPart: name, skinLayer: layer};
                 meshGroup.add(shell);
@@ -211,6 +213,7 @@ export class SkinModel {
      */
     setCape(texture) {
         if (!this.playerGroup) return;
+        normalizeCapeTexture(texture);
         this.capeBinding = null;
 
         let prevTransform = null;
@@ -274,6 +277,7 @@ export class SkinModel {
 
             glowMat.uniforms.thickness.value = 0;
             glowMat.uniforms.opacity.value = 0;
+            glowMat.visible=false;
             glowMat.polygonOffset = true;
             if (i > 0) glowMat.polygonOffsetFactor = i * 0.1;
 
@@ -398,6 +402,7 @@ export class SkinModel {
                     mesh.userData.glowMat.uniforms.opacity.value = i === 0 ? intensity
                         : intensity / this.LAYERS_COUNT * Math.exp(-3 * progress);
                 }
+                mesh.userData.glowMat.visible = mesh.userData.glowMat.uniforms.opacity.value > 0.01;
             });
         });
     }

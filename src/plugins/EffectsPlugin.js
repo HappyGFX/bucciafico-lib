@@ -1,8 +1,9 @@
 import {renderPlan} from '../utils/RenderOutput.js';
-import {DEFAULT_GLOW_SETTINGS} from '../utils/GlowConfig.js';
+import {DEFAULT_GLOW_SETTINGS,normalizeGlow} from '../utils/GlowConfig.js';
 import {DEFAULT_AO, DEFAULT_DOF, normalizePostEffect} from '../utils/PostEffectsConfig.js';
 import * as THREE from 'three';
 import {PostProcessingManager} from '../managers/PostProcessingManager.js';
+import {GlowBatcher} from '../managers/GlowBatcher.js';
 
 /**
  * Plugin responsible for visual effects and post-processing.
@@ -16,6 +17,7 @@ export class EffectsPlugin {
 
     init(viewer) {
         this.viewer = viewer;
+        this.glowBatcher = new GlowBatcher();
         const w = viewer.container.clientWidth;
         const h = viewer.container.clientHeight;
 
@@ -37,7 +39,27 @@ export class EffectsPlugin {
                 ? THREE.MathUtils.clamp(this.state[key], 0, 2) : DEFAULT_GLOW_SETTINGS[key];
         }
 
+        // Retain the legacy scene API; UI edits use updateObjectConfig instead.
+        if (Object.keys(DEFAULT_GLOW_SETTINGS).some(key => Object.hasOwn(config,key))) {
+            for (const root of this.objectRoots()) root.userData.glow = normalizeGlow(this.state);
+        }
         this._applyToScene();
+    }
+
+    objectRoots() {
+        return [...this.viewer.characters.map(c=>c.model.getGroup()), ...(this.viewer.getPlugin('ItemsPlugin')?.items||[])];
+    }
+
+    getObjectConfig(root) {
+        root.userData.glow = normalizeGlow(root.userData.glow || this.state);
+        return {...root.userData.glow};
+    }
+
+    updateObjectConfig(root, patch) {
+        if (!this.objectRoots().includes(root)) throw Error("Select a whole character, block, item or model");
+        root.userData.glow = normalizeGlow(this.getObjectConfig(root),patch);
+        this._applyToScene();
+        this.viewer.emit('effects:change',root);
     }
 
     /**
@@ -57,17 +79,20 @@ export class EffectsPlugin {
         skin.updateBones();
 
         for (const {model} of this.viewer.characters) {
-            model.setGlowEffect(config.enabled, config.strength);
-            model.updateBorderThickness(config.thickness);
-            model.updateGlowHeight(config.height);
+            const settings = this.getObjectConfig(model.getGroup());
+            model.setGlowEffect(settings.enabled, settings.strength);
+            model.updateBorderThickness(settings.thickness);
+            model.updateGlowHeight(settings.height);
+            for (const layer of model.glowMeshes.flat()) layer.material.uniforms.glowGain.value =
+                layer.material.defines?.SURFACE_GLOW ? settings.innerGlow : settings.outerGlow;
         }
 
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
         if (itemsPlugin) {
-            itemsPlugin.updateAllGlow(config);
+            for (const item of itemsPlugin.items) itemsPlugin.updateItemGlow(item, this.getObjectConfig(item));
         }
 
-        this.composer.setBloom(config.enabled, config.strength, config.radius, 0.1, config.innerGlow, config.outerGlow);
+        this.composer.setBloom(false, 0, 0, 0.1, 1, 1, false);
         this.composer.depthEffects.configure(config.ao, config.dof);
         this.viewer.requestRender();
     }
@@ -87,6 +112,7 @@ export class EffectsPlugin {
      * Custom render loop called by the Core animate().
      */
     render() {
+        if(this.viewer.renderSuspensions)return;
         const skin = this.viewer.skinModel;
         this.viewer.characters.forEach(c => c.model.updateBones());
         const itemsPlugin = this.viewer.getPlugin('ItemsPlugin');
@@ -97,6 +123,22 @@ export class EffectsPlugin {
             [...this.viewer.characters.map(c=>c.model.playerGroup), ...items], this.viewer.cameraManager.controls.target);
         const equipmentMaterials = new Map();
 
+        const groups = new Map();
+        try {
+        for (const root of this.objectRoots()) {
+            const c = this.getObjectConfig(root);if (!c.enabled) continue;
+            let visible=true;for(let parent=root;parent;parent=parent.parent)if(!parent.visible){visible=false;break;}
+            if(!visible)continue;
+            const key = JSON.stringify([c.strength,c.radius,c.innerGlow,c.outerGlow]);
+            if (!groups.has(key)) groups.set(key,{config:c,layers:new Set()});
+            const owner = this.viewer.characters.find(character=>character.model.getGroup()===root);
+            if (owner) owner.model.glowMeshes.forEach(layers=>this.glowBatcher.prepare(layers).forEach(layer=>groups.get(key).layers.add(layer)));
+            else {
+                const layerSets=[];
+                root.traverse(mesh=>{if(mesh.userData.glowLayers)layerSets.push(mesh.userData.glowLayers);});
+                layerSets.forEach(layers=>this.glowBatcher.prepare(layers).forEach(layer=>groups.get(key).layers.add(layer)));
+            }
+        }
         this.composer.renderSelective(
             () => {
                 this.viewer.characters.forEach(c => c.model.darkenBody());
@@ -124,8 +166,10 @@ export class EffectsPlugin {
                 equipmentMaterials.forEach((material, mesh) => {
                     mesh.material = material;
                 });
-            }
+            },
+            [...groups.values()]
         );
+        } finally {this.glowBatcher.restore();}
     }
 
     /**
@@ -143,6 +187,7 @@ export class EffectsPlugin {
         return this.captureCanvas(width,height,options).toDataURL('image/png');
     }
     captureCanvas(width,height,options={}) {
+        if(this.viewer.renderSuspensions)throw Error('The scene is being updated. Wait for the operation to finish before rendering.');
         const viewer=this.viewer,renderer=viewer.renderer,camera=viewer.cameraManager.camera;
         const size=renderer.getSize(new THREE.Vector2()),ratio=renderer.getPixelRatio();
         width=width||size.x;height=height||size.y;
@@ -172,6 +217,7 @@ export class EffectsPlugin {
     }
 
     dispose() {
+        this.glowBatcher?.dispose();
         if (this.composer) {
             this.composer.dispose();
             this.composer = null;

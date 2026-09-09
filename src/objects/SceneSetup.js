@@ -9,6 +9,9 @@ export const MINECRAFT_LIGHTING = {
 export class SceneSetup {
     constructor(scene, renderer) {
         this.scene = scene;
+        this.shadowObjects = new Map();
+        this.shadowGeometry = new WeakMap();
+        this.shadowDirty = true;
         this.renderer = renderer;
         this.lightConfig = { global: 0.8, main: 0.8, fill: 0.4, shadows: false,
             shadowStrength: 0.65, shadowSoftness: 1, sunAzimuth: 45, sunElevation: 55 };
@@ -37,6 +40,7 @@ export class SceneSetup {
     setGridVisible(vis) { this.gridHelper.visible = vis; }
 
     setLightConfig(config) {
+        this.shadowDirty = true;
         const ranges = { global:[0,3], main:[0,3], fill:[0,3], shadowStrength:[0,1],
             shadowSoftness:[0,4], sunAzimuth:[-180,180], sunElevation:[5,90] };
         for (const [key,[min,max]] of Object.entries(ranges)) {
@@ -44,6 +48,7 @@ export class SceneSetup {
         }
         if (typeof config.shadows === 'boolean') this.lightConfig.shadows = config.shadows;
         const c = this.lightConfig;
+        if(!c.shadows)this.shadowObjects.clear();
         this.ambientLight.intensity = c.global;
         this.hemiLight.intensity = c.global * 0.6;
         this.dirLightFill.intensity = c.fill;
@@ -71,14 +76,31 @@ export class SceneSetup {
         if (!this.lightConfig.shadows || !this.renderer) return;
         this.scene.updateMatrixWorld(true);
         const bounds = new THREE.Box3();
+        let changed=this.shadowDirty;
+        const seen=new Set();
         this.scene.traverseVisible(mesh => {
             if (!mesh.isMesh || !mesh.geometry || mesh.userData.isGlow || mesh.userData.isGlowLayer || mesh.userData.isNametag) return;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            // Positions may have changed through elbow/knee/torso deformation.
-            mesh.geometry.computeBoundingBox();
+            const geometry=mesh.geometry,positions=geometry.attributes.position;
+            const version=positions?.version,interleavedVersion=positions?.data?.version;
+            let cached=this.shadowGeometry.get(geometry);
+            if(!cached||cached.positions!==positions||cached.version!==version||cached.interleavedVersion!==interleavedVersion){
+                geometry.computeBoundingBox();
+                cached={positions,version,interleavedVersion};this.shadowGeometry.set(geometry,cached);
+            }
+            const materials=[mesh.material].flat();
+            const surface=materials.map(m=>[m.uuid,m.visible,m.opacity,m.alphaTest,m.side,m.map?.uuid,m.map?.version,m.alphaMap?.uuid,m.alphaMap?.version].join(':')).join('|');
+            const previous=this.shadowObjects.get(mesh);
+            if(!previous||previous.geometry!==cached||previous.surface!==surface||!previous.matrix.equals(mesh.matrixWorld)){
+                changed=true;this.shadowObjects.set(mesh,{geometry:cached,surface,matrix:mesh.matrixWorld.clone()});
+            }
+            seen.add(mesh);
             bounds.union(mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld));
         });
+        for(const mesh of this.shadowObjects.keys())if(!seen.has(mesh)){this.shadowObjects.delete(mesh);changed=true;}
+        if(!changed)return;
+        this.shadowDirty=false;
         if (bounds.isEmpty()) return;
         const center = bounds.getCenter(new THREE.Vector3());
         const radius = Math.max(bounds.getSize(new THREE.Vector3()).length()/2, 8);
@@ -105,5 +127,5 @@ export class SceneSetup {
     }
 
     getLightConfig() { return {...this.lightConfig}; }
-    dispose() { this.dirLightMain.shadow.dispose(); }
+    dispose() { this.shadowObjects.clear();this.shadowGeometry=new WeakMap();this.dirLightMain.shadow.dispose(); }
 }

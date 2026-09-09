@@ -43,6 +43,7 @@ export class SkinViewer {
 
         this.isVisible = true;
         this.needsRender = true;
+        this.renderSuspensions = 0;
 
         this.events = new EventManager();
 
@@ -113,6 +114,25 @@ export class SkinViewer {
      */
     requestRender() {
         this.needsRender = true;
+    }
+
+    /** Keep the last complete frame visible while an async scene edit is staged. */
+    suspendRendering() {
+        if(this.renderSuspensions++===0){
+            this.suspendedCameraEnabled=this.cameraManager.controls.enabled;
+            this.cameraManager.controls.enabled=false;
+            this.suspendedCanvasInert=this.renderer.domElement.inert;
+            this.renderer.domElement.inert=true;
+        }
+        let released=false;
+        return ()=>{
+            if(released)return;released=true;
+            if(--this.renderSuspensions||this.isDisposed)return;
+            this.cameraManager.controls.enabled=this.suspendedCameraEnabled;
+            this.renderer.domElement.inert=this.suspendedCanvasInert;
+            if(this.resizePending){this.resizePending=false;this.onResize();}
+            this.requestRender();
+        };
     }
 
     /**
@@ -303,6 +323,7 @@ export class SkinViewer {
      */
     onResize() {
         if (!this.container) return;
+        if(this.renderSuspensions){this.resizePending=true;return;}
         const w = this.container.clientWidth;
         const h = this.container.clientHeight;
 
@@ -319,7 +340,12 @@ export class SkinViewer {
 
     animate() {
         if (this.isDisposed || !this.isVisible) return;
-        requestAnimationFrame(this.animate);
+        // IntersectionObserver can wake an already running viewer. Keep exactly
+        // one pending frame rather than starting another permanent render loop.
+        if(this.animationFrame!=null)cancelAnimationFrame(this.animationFrame);
+        this.animationFrame=requestAnimationFrame(()=>{this.animationFrame=null;this.animate();});
+
+        if(this.renderSuspensions)return;
 
         this.cameraManager.update();
 
@@ -327,9 +353,14 @@ export class SkinViewer {
             return;
         }
 
-        this.characters.forEach(c=>c.model.updateBones());
-        this.getPlugin('EditorPlugin')?.syncBoneHandle();
+        const info=this.renderer.info,autoReset=info.autoReset;
+        info.autoReset=false;info.reset();
+        try {
+
         const effects = this.getPlugin('EffectsPlugin');
+        // EffectsPlugin also supports direct captures and updates the pose itself.
+        if(!effects)this.characters.forEach(c=>c.model.updateBones());
+        this.getPlugin('EditorPlugin')?.syncBoneHandle();
 
         if (effects) {
             effects.render();
@@ -344,11 +375,16 @@ export class SkinViewer {
         this.renderer.render(this.overlayScene, this.cameraManager.camera);
 
         this.needsRender = false;
+        } finally {
+            this.renderStats={calls:info.render.calls,triangles:info.render.triangles};
+            info.autoReset=autoReset;
+        }
     }
 
     dispose() {
         this.emit('viewer:dispose');
         this.isDisposed = true;
+        if(this.animationFrame!=null)cancelAnimationFrame(this.animationFrame);
         this.observer.disconnect();
 
         this.plugins.forEach(p => {

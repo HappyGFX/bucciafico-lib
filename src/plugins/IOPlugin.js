@@ -97,6 +97,7 @@ export class IOPlugin {
                         name: item.name,
                         uuid: item.uuid,
                         equipment: itemsPlugin.equipmentData(item),
+                        glow: structuredClone(item.userData.glow),
                         sourceUrl: item.userData.sourceUrl && !item.userData.sourceUrl.startsWith('data:') ? embeddedImage(item.material?.map) : item.userData.sourceUrl || null,
                         resource: item.userData.resourceSpec || undefined,
                         importedModel: item.userData.importedModel,
@@ -177,7 +178,11 @@ export class IOPlugin {
         this.queue=task.catch(()=>{});return task;
     }
     validate(input){const result=validateProject(input);this.viewer.getPlugin('SceneToolsPlugin')?.validateHierarchy(result.data);return result;}
-    async restoreProject(jsonData, {history=false,repairable=false,preserveHistory=false}={}) {
+    async restoreProject(jsonData, options={}) {
+        const resume=this.viewer.suspendRendering();
+        try{return await this._restoreProject(jsonData,options);}finally{resume();}
+    }
+    async _restoreProject(jsonData, {history=false,repairable=false,preserveHistory=false}={}) {
         const {data} = this.validate(jsonData);
         if (!data || typeof data !== 'object') throw new Error('Nieprawidłowy projekt.');
         if(repairable)for(const bundle of [data.resources,...Object.values(data.resourceScopes||{})].filter(Boolean)){
@@ -295,6 +300,12 @@ export class IOPlugin {
                 const {DEFAULT_AO,DEFAULT_DOF}=await import('../utils/PostEffectsConfig.js');
                 this.viewer.getPlugin('EffectsPlugin')?.updateConfig({innerGlow:1, outerGlow:1, ...data.effects.backlight,
                     ao:{...DEFAULT_AO,...data.effects.backlight.ao},dof:{...DEFAULT_DOF,...data.effects.backlight.dof}});
+            }
+            const fx=this.viewer.getPlugin('EffectsPlugin');
+            if(fx){
+                staged.forEach((c,i)=>{c.model.getGroup().userData.glow=structuredClone(records[i].glow||data.effects?.backlight||{enabled:false});});
+                stagedItems.forEach(mesh=>{const record=(data.items||[]).find(r=>r.uuid===mesh.uuid);mesh.userData.glow=structuredClone(record?.glow||record?.equipment?.glow||data.effects?.backlight||{enabled:false});});
+                fx.forceUpdate();
             }
             if (posing) {
                 if(!history)this.viewer.projectPoseLibrary=structuredClone(data.poseLibrary||[]);

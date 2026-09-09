@@ -4,6 +4,10 @@ const vertexShader = `
     uniform float thickness;
     uniform mat4 gradientMatrix;
     uniform mat3 gradientNormalMatrix;
+    #ifdef BATCHED_GLOW
+        attribute vec2 glowInstance;
+        varying float vGlowOpacity;
+    #endif
     varying vec2 vUv;
     varying float vY;
     varying vec3 vNormal;
@@ -17,6 +21,10 @@ const vertexShader = `
         vUv = uv;
         vNormal = normalize(gradientNormalMatrix * normal);
         vec3 newPos = position + normal * thickness;
+        #ifdef BATCHED_GLOW
+            newPos = position + normal * glowInstance.x;
+            vGlowOpacity = glowInstance.y;
+        #endif
         #ifdef SURFACE_GLOW
             vGlowPosition = glowPosition;
             vGlowNormal = glowNormal;
@@ -38,6 +46,9 @@ const fragmentShader = `
     uniform float minY;
     varying float vY;
     varying vec3 vNormal;
+    #ifdef BATCHED_GLOW
+        varying float vGlowOpacity;
+    #endif
     #ifdef SURFACE_GLOW
         uniform vec3 boundsMin;
         uniform vec3 boundsMax;
@@ -46,7 +57,11 @@ const fragmentShader = `
         varying vec3 vGlowNormal;
     #endif
     void main() {
-        if (opacity <= 0.01 || glowGain <= 0.0) discard;
+        float layerOpacity = opacity;
+        #ifdef BATCHED_GLOW
+            layerOpacity = vGlowOpacity;
+        #endif
+        if (layerOpacity <= 0.01 || glowGain <= 0.0) discard;
         float skinAlpha = hasSkinMap ? texture2D(skinMap,vUv).a : 1.0;
         if(skinAlpha < 0.0039) discard;
         if (vNormal.y < -0.9) discard;
@@ -69,7 +84,7 @@ const fragmentShader = `
         #endif
         
         // HDR rim feeds bloom without raising the brightness of the skin itself.
-        gl_FragColor = vec4(vec3(2.0 * glowGain), alpha * opacity * skinAlpha);
+        gl_FragColor = vec4(vec3(2.0 * glowGain), alpha * layerOpacity * skinAlpha);
     }
 `;
 

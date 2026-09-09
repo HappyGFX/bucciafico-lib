@@ -176,6 +176,8 @@ export class ItemsPlugin {
     }
 
     updateItemGlow(item, config) {
+        if(item.userData.resourceSpec||item.userData.importedModel||item.userData.sourceUrl)
+            config=this.viewer.getPlugin('EffectsPlugin')?.getObjectConfig(item)||config;
         if (item.userData.resourceSpec || item.userData.importedModel) {
             if (item.userData.resourceError) return;
             const meshes = [];
@@ -227,6 +229,7 @@ export class ItemsPlugin {
                 const baseOpacity = i === 0 ? intensity : intensity / this.LAYERS_COUNT * Math.exp(-3 * progress);
                 mat.uniforms.opacity.value = baseOpacity;
             }
+            mat.visible = mat.uniforms.opacity.value > 0.01;
         });
     }
 
